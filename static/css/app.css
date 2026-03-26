@@ -1,0 +1,7 @@
+.app-container {
+    max-width: 560px;
+}
+
+input, select, textarea {
+    width: 100%;
+}
