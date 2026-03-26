@@ -12,6 +12,10 @@
 </header>
 
 <div class="d-grid gap-2 mb-4">
+
+{% if request.user.can_access_backoffice %}
+    <a class="btn btn-outline-dark" href="{% url 'adminpanel:dashboard' %}">Админ-панель</a>
+{% endif %}
     <a class="btn btn-outline-primary" href="{% url 'core:profile_placeholder' %}">Личный кабинет</a>
     <a class="btn btn-outline-primary" href="{% url 'core:knowledge_base_placeholder' %}">Энциклопедия</a>
 </div>

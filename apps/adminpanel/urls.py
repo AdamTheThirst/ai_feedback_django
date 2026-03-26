@@ -1,0 +1,61 @@
+"""Маршруты внутренней административной панели и контентных CRUD-разделов."""
+
+from django.urls import path
+
+from apps.adminpanel.views import (
+    AnalysisPromptArchiveView,
+    AnalysisPromptCreateView,
+    AnalysisPromptListView,
+    AnalysisPromptUpdateView,
+    DashboardView,
+    GameArchiveView,
+    GameCreateView,
+    GameListView,
+    GameUpdateView,
+    MediaArchiveView,
+    MediaCreateView,
+    MediaListView,
+    MediaUpdateView,
+    ScenarioArchiveView,
+    ScenarioCreateView,
+    ScenarioListView,
+    ScenarioPromptArchiveView,
+    ScenarioPromptCreateView,
+    ScenarioPromptListView,
+    ScenarioPromptUpdateView,
+    ScenarioUpdateView,
+    SystemPromptArchiveView,
+    SystemPromptCreateView,
+    SystemPromptListView,
+    SystemPromptUpdateView,
+)
+
+app_name = "adminpanel"
+
+urlpatterns = [
+    path("", DashboardView.as_view(), name="dashboard"),
+    path("games/", GameListView.as_view(), name="game_list"),
+    path("games/create/", GameCreateView.as_view(), name="game_create"),
+    path("games/<int:pk>/edit/", GameUpdateView.as_view(), name="game_update"),
+    path("games/<int:pk>/archive/", GameArchiveView.as_view(), name="game_archive"),
+    path("scenarios/", ScenarioListView.as_view(), name="scenario_list"),
+    path("scenarios/create/", ScenarioCreateView.as_view(), name="scenario_create"),
+    path("scenarios/<int:pk>/edit/", ScenarioUpdateView.as_view(), name="scenario_update"),
+    path("scenarios/<int:pk>/archive/", ScenarioArchiveView.as_view(), name="scenario_archive"),
+    path("scenario-prompts/", ScenarioPromptListView.as_view(), name="scenario_prompt_list"),
+    path("scenario-prompts/create/", ScenarioPromptCreateView.as_view(), name="scenario_prompt_create"),
+    path("scenario-prompts/<int:pk>/edit/", ScenarioPromptUpdateView.as_view(), name="scenario_prompt_update"),
+    path("scenario-prompts/<int:pk>/archive/", ScenarioPromptArchiveView.as_view(), name="scenario_prompt_archive"),
+    path("analysis-prompts/", AnalysisPromptListView.as_view(), name="analysis_prompt_list"),
+    path("analysis-prompts/create/", AnalysisPromptCreateView.as_view(), name="analysis_prompt_create"),
+    path("analysis-prompts/<int:pk>/edit/", AnalysisPromptUpdateView.as_view(), name="analysis_prompt_update"),
+    path("analysis-prompts/<int:pk>/archive/", AnalysisPromptArchiveView.as_view(), name="analysis_prompt_archive"),
+    path("system-prompts/", SystemPromptListView.as_view(), name="system_prompt_list"),
+    path("system-prompts/create/", SystemPromptCreateView.as_view(), name="system_prompt_create"),
+    path("system-prompts/<int:pk>/edit/", SystemPromptUpdateView.as_view(), name="system_prompt_update"),
+    path("system-prompts/<int:pk>/archive/", SystemPromptArchiveView.as_view(), name="system_prompt_archive"),
+    path("media/", MediaListView.as_view(), name="media_list"),
+    path("media/create/", MediaCreateView.as_view(), name="media_create"),
+    path("media/<int:pk>/edit/", MediaUpdateView.as_view(), name="media_update"),
+    path("media/<int:pk>/archive/", MediaArchiveView.as_view(), name="media_archive"),
+]

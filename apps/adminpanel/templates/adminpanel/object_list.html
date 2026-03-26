@@ -1,0 +1,36 @@
+{% extends "adminpanel/base.html" %}
+
+{% block title %}{{ section_title }}{% endblock %}
+
+{% block backoffice_content %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h2 class="h5 mb-0">{{ section_title }}</h2>
+    <a class="btn btn-primary btn-sm" href="{% url create_url %}">Создать</a>
+</div>
+
+<div class="card">
+    <div class="list-group list-group-flush">
+        {% for obj in object_list %}
+            <div class="list-group-item d-flex justify-content-between align-items-start gap-2">
+                <div>
+                    <div class="fw-semibold">{{ obj }}</div>
+                    {% if obj.is_archived %}
+                        <div class="text-muted small">Архивировано</div>
+                    {% endif %}
+                </div>
+                <div class="d-flex gap-2">
+                    <a class="btn btn-outline-secondary btn-sm" href="{% url update_url_name obj.pk %}">Изменить</a>
+                    {% if not obj.is_archived %}
+                        <form method="post" action="{% url archive_url_name obj.pk %}">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-danger btn-sm">Архивировать</button>
+                        </form>
+                    {% endif %}
+                </div>
+            </div>
+        {% empty %}
+            <div class="list-group-item text-muted">Записей пока нет.</div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
