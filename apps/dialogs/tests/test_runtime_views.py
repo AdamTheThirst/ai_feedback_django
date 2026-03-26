@@ -5,8 +5,9 @@ import json
 from django.test import TestCase
 from django.urls import reverse
 
+from apps.analysis.models import AnalysisRun
 from apps.accounts.models import User
-from apps.content.models import Game, Scenario, ScenarioPrompt
+from apps.content.models import AnalysisPrompt, Game, Scenario, ScenarioPrompt
 from apps.dialogs.models import DialogEndedReason, DialogMessageRole, DialogSession, DialogSessionStatus
 
 
@@ -77,6 +78,19 @@ class DialogRuntimeTests(TestCase):
             scenario=self.scenario,
             title="Основной промт",
             prompt_text="Ведите ролевой диалог.",
+            is_active=True,
+            created_by=self.user,
+        )
+        AnalysisPrompt.objects.create(
+            game=self.game,
+            alias="clarity",
+            title="Ясность",
+            header_text="Конкретика и ясность",
+            comment_text="",
+            prompt_text="Оцени ясность ответа.",
+            sort_order=1,
+            min_rating=0,
+            max_rating=5,
             is_active=True,
             created_by=self.user,
         )
@@ -206,3 +220,127 @@ class DialogRuntimeTests(TestCase):
 
         self.assertEqual(second_response.status_code, 409)
         self.assertEqual(second_response.json()["code"], "dialog_not_active")
+
+    def test_results_page_contains_export_button_and_transcript(self) -> None:
+        """Проверяет ключевые элементы экрана результатов после завершения диалога.
+
+        Контекст использования:
+            Гарантирует, что страница результата содержит экспорт в PDF,
+            сумму баллов и блок транскрипта в соответствии со спецификацией.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; выполняет HTTP и content-assertions.
+
+        Исключения и особые случаи:
+            При несоответствии шаблона требованиям тест падает.
+
+        Побочные эффекты:
+            Создаёт и завершает тестовый диалог с запуском анализа.
+        """
+
+        self.client.force_login(self.user)
+        dialog = self._start_dialog()
+        self.client.post(
+            reverse("dialogs:send_message", kwargs={"dialog_public_id": dialog.public_id}),
+            data=json.dumps({"text": "Даю развёрнутую обратную связь по задаче."}),
+            content_type="application/json",
+        )
+        self.client.post(
+            reverse("dialogs:finish_dialog", kwargs={"dialog_public_id": dialog.public_id}),
+            data=json.dumps({"reason": "manual_feedback"}),
+            content_type="application/json",
+        )
+
+        response = self.client.get(reverse("dialogs:dialog_results", kwargs={"dialog_public_id": dialog.public_id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Экспорт результатов в PDF")
+        self.assertContains(response, "Транскрипт диалога")
+        self.assertContains(response, "Сумма:")
+
+    def test_export_pdf_returns_attachment_for_owner(self) -> None:
+        """Проверяет успешную выдачу PDF-файла владельцу диалога.
+
+        Контекст использования:
+            Покрывает позитивный поток TC-PDF-001/TC-PDF-004 на уровне endpoint-а.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; выполняет проверки HTTP-заголовков и сигнатуры PDF.
+
+        Исключения и особые случаи:
+            При невалидном ответе endpoint-а тест падает.
+
+        Побочные эффекты:
+            Создаёт завершённый диалог с анализом в тестовой БД.
+        """
+
+        self.client.force_login(self.user)
+        dialog = self._start_dialog()
+        self.client.post(
+            reverse("dialogs:send_message", kwargs={"dialog_public_id": dialog.public_id}),
+            data=json.dumps({"text": "Поясняю решение по этапам и рискам."}),
+            content_type="application/json",
+        )
+        self.client.post(
+            reverse("dialogs:finish_dialog", kwargs={"dialog_public_id": dialog.public_id}),
+            data=json.dumps({"reason": "manual_feedback"}),
+            content_type="application/json",
+        )
+
+        response = self.client.get(reverse("dialogs:dialog_export_pdf", kwargs={"dialog_public_id": dialog.public_id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("attachment;", response["Content-Disposition"])
+        self.assertTrue(response.content.startswith(b"%PDF"))
+        self.assertTrue(AnalysisRun.objects.filter(dialog=dialog).exists())
+
+    def test_export_pdf_is_forbidden_for_foreign_user(self) -> None:
+        """Проверяет, что пользователь не может скачать чужой PDF по прямой ссылке.
+
+        Контекст использования:
+            Покрывает security-требование TC-PDF-004 для endpoint-а экспорта.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; проверяет 404 для чужого диалога.
+
+        Исключения и особые случаи:
+            При утечке доступа тест падает.
+
+        Побочные эффекты:
+            Создаёт второго пользователя и его диалог.
+        """
+
+        foreign_user = User.objects.create_user(
+            email="foreign@example.com",
+            nickname="Чужой",
+            password="StrongPassword123",
+            avatar_letter="Ч",
+            avatar_bg_hex="#D0F7E5",
+        )
+
+        self.client.force_login(foreign_user)
+        foreign_dialog = self._start_dialog()
+        self.client.post(
+            reverse("dialogs:send_message", kwargs={"dialog_public_id": foreign_dialog.public_id}),
+            data=json.dumps({"text": "Сообщение владельца диалога."}),
+            content_type="application/json",
+        )
+        self.client.post(
+            reverse("dialogs:finish_dialog", kwargs={"dialog_public_id": foreign_dialog.public_id}),
+            data=json.dumps({"reason": "manual_feedback"}),
+            content_type="application/json",
+        )
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("dialogs:dialog_export_pdf", kwargs={"dialog_public_id": foreign_dialog.public_id}))
+        self.assertEqual(response.status_code, 404)

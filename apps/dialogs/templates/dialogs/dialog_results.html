@@ -8,8 +8,8 @@
         <h1 class="h5">Результат диалога</h1>
         <p class="mb-1"><strong>Игра:</strong> {{ dialog.game.title }}</p>
         <p class="mb-1"><strong>Сценарий:</strong> {{ dialog.scenario.title }}</p>
-        <p class="mb-1"><strong>Статус:</strong> {{ dialog.status }}</p>
-        <p class="mb-0"><strong>Причина завершения:</strong> {{ dialog.ended_reason|default:"—" }}</p>
+        <p class="mb-1"><strong>Статус:</strong> {{ dialog.get_status_display }}</p>
+        <p class="mb-0"><strong>Причина завершения:</strong> {{ dialog.get_ended_reason_display|default:"—" }}</p>
     </div>
 </div>
 
@@ -17,7 +17,7 @@
     <div class="card shadow-sm mb-3">
         <div class="card-body">
             <div class="h6 mb-1">Сумма: {{ total_score }} из {{ total_max }}</div>
-            <div class="small text-muted">Статус анализа: {{ analysis_run.status }}</div>
+            <div class="small text-muted">Статус анализа: {{ analysis_run.get_status_display }}</div>
         </div>
     </div>
 
@@ -33,6 +33,8 @@
                     {% endif %}
                 </div>
             </article>
+        {% empty %}
+            <div class="alert alert-secondary mb-0">Результаты анализа пока отсутствуют.</div>
         {% endfor %}
     </section>
 {% elif dialog.status == 'analysis_skipped' %}
@@ -45,5 +47,24 @@
     </div>
 {% endif %}
 
-<a href="{% url 'content:game_list' %}" class="btn btn-primary">К списку игр</a>
+<section class="card shadow-sm mb-3">
+    <div class="card-body">
+        <h2 class="h6">Транскрипт диалога</h2>
+        {% for message in messages %}
+            <div class="mb-2 pb-2 border-bottom">
+                <div class="small text-muted">#{{ message.sequence_no }} • {{ message.get_role_display }}</div>
+                <div>{{ message.text }}</div>
+            </div>
+        {% empty %}
+            <div class="text-muted">Сообщения отсутствуют.</div>
+        {% endfor %}
+    </div>
+</section>
+
+<div class="d-grid gap-2">
+    <a href="{{ export_pdf_url }}" class="btn btn-outline-primary">Экспорт результатов в PDF</a>
+    <a href="{% url 'content:game_list' %}" class="btn btn-primary">К тренажёру</a>
+    <a href="{% url 'core:profile_placeholder' %}" class="btn btn-outline-secondary">Личный кабинет (скоро)</a>
+    <a href="{% url 'core:knowledge_base_placeholder' %}" class="btn btn-outline-secondary">Энциклопедия (скоро)</a>
+</div>
 {% endblock %}

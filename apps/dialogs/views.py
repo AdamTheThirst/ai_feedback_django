@@ -11,6 +11,7 @@ from django.views.decorators.http import require_GET, require_POST
 from apps.analysis.services.runner import run_analysis_for_dialog
 from apps.content.models import Scenario
 from apps.dialogs.models import DialogMessage, DialogSession, DialogSessionStatus
+from apps.dialogs.services.results import build_dialog_results_view_model
 from apps.dialogs.services.runtime import (
     DialogNotActiveError,
     DuplicateFinishError,
@@ -23,6 +24,8 @@ from apps.dialogs.services.runtime import (
     get_active_dialog_for_user,
     send_user_message,
 )
+from apps.exports.services.pdf import PdfExportError, build_dialog_results_pdf
+from apps.auditlog.models import AuditLogEntry, AuditLogLevel
 
 
 def _dialog_to_payload(dialog: DialogSession) -> dict:
@@ -115,33 +118,98 @@ def dialog_detail_view(request: HttpRequest, dialog_public_id: str) -> HttpRespo
 @login_required
 @require_GET
 def dialog_results_view(request: HttpRequest, dialog_public_id: str) -> HttpResponse:
-    """Показывает финальное состояние диалога и результаты анализа при наличии."""
+    """Показывает пользователю экран результата по завершённому диалогу.
+
+    Контекст использования:
+        Endpoint открывается после finish/abandon и рендерит итоговую страницу
+        с суммой баллов, карточками анализа и полным транскриптом.
+
+    Параметры:
+        request: HTTP-запрос авторизованного пользователя.
+        dialog_public_id: Публичный UUID диалога, доступного только владельцу.
+
+    Возвращаемое значение:
+        ``HttpResponse`` с HTML-страницей результата.
+
+    Исключения и особые случаи:
+        Если диалог не принадлежит пользователю, возвращается 404.
+
+    Побочные эффекты:
+        Выполняет чтение данных диалога, сообщений и анализа из БД.
+    """
 
     dialog = get_object_or_404(
         DialogSession.objects.select_related("analysis_run", "game", "scenario"),
         public_id=dialog_public_id,
         user=request.user,
     )
-    analysis_run = getattr(dialog, "analysis_run", None)
-    analysis_results = []
-    total_score = 0
-    total_max = 0
-    if analysis_run is not None:
-        analysis_results = list(analysis_run.results.order_by("sort_order_snapshot", "id"))
-        total_score = sum(item.rating for item in analysis_results)
-        total_max = sum(item.rating_max for item in analysis_results)
+    view_model = build_dialog_results_view_model(dialog)
 
     return render(
         request,
         "dialogs/dialog_results.html",
         {
-            "dialog": dialog,
-            "analysis_run": analysis_run,
-            "analysis_results": analysis_results,
-            "total_score": total_score,
-            "total_max": total_max,
+            "dialog": view_model.dialog,
+            "analysis_run": view_model.analysis_run,
+            "analysis_results": view_model.analysis_results,
+            "messages": view_model.messages,
+            "total_score": view_model.total_score,
+            "total_max": view_model.total_max,
+            "export_pdf_url": f"/dialogs/{view_model.dialog.public_id}/export-pdf/",
         },
     )
+
+
+@login_required
+@require_GET
+def export_dialog_pdf_view(request: HttpRequest, dialog_public_id: str) -> HttpResponse:
+    """Экспортирует результат диалога в PDF по сохранённым данным.
+
+    Контекст использования:
+        Вызывается с экрана результата по кнопке «Экспорт результатов в PDF».
+
+    Параметры:
+        request: HTTP-запрос авторизованного пользователя.
+        dialog_public_id: Публичный UUID диалога владельца.
+
+    Возвращаемое значение:
+        ``HttpResponse`` с ``application/pdf`` или редирект обратно на экран результата.
+
+    Исключения и особые случаи:
+        При ошибке генерации возвращает дружелюбное сообщение и пишет аудит-лог.
+
+    Побочные эффекты:
+        Генерирует PDF в памяти и при ошибке создаёт запись ``AuditLogEntry``.
+    """
+
+    dialog = get_object_or_404(
+        DialogSession.objects.select_related("analysis_run", "game", "scenario"),
+        public_id=dialog_public_id,
+        user=request.user,
+    )
+    view_model = build_dialog_results_view_model(dialog)
+    if view_model.analysis_run is None:
+        messages.error(request, "Экспорт пока недоступен: анализ ещё не сформирован.")
+        return redirect("dialogs:dialog_results", dialog_public_id=dialog.public_id)
+
+    try:
+        pdf_bytes = build_dialog_results_pdf(view_model)
+    except PdfExportError as exc:
+        AuditLogEntry.objects.create(
+            level=AuditLogLevel.ERROR,
+            event_type="pdf.export_failed",
+            message="Ошибка генерации PDF для диалога.",
+            actor_user=request.user,
+            dialog=dialog,
+            context_json={"dialog_public_id": str(dialog.public_id)},
+            traceback_text=str(exc),
+        )
+        messages.error(request, "Не удалось сформировать PDF. Попробуйте ещё раз позже.")
+        return redirect("dialogs:dialog_results", dialog_public_id=dialog.public_id)
+
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="dialog-result-{dialog.public_id}.pdf"'
+    return response
 
 
 @login_required
