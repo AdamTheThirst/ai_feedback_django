@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}{{ game.title }}{% endblock %}
+
+{% block content %}
+<header class="mb-3">
+    <a href="{% url 'content:game_list' %}" class="btn btn-link px-0">← Назад к играм</a>
+    <h1 class="h4 mb-1">{{ game.title }}</h1>
+    {% if game.short_description %}<p class="text-muted mb-0">{{ game.short_description }}</p>{% endif %}
+</header>
+
+<section class="d-grid gap-2">
+    {% for scenario in scenarios %}
+        <a href="{% url 'dialogs:start_scenario' scenario.slug %}" class="btn btn-primary text-start">{{ scenario.title }}</a>
+    {% empty %}
+        <div class="alert alert-secondary">В этой игре пока нет доступных сценариев.</div>
+    {% endfor %}
+</section>
+{% endblock %}

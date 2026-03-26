@@ -96,7 +96,7 @@ class CoreViewsTests(TestCase):
 
         self.client.force_login(self.user)
         response = self.client.get(reverse("core:root"))
-        self.assertRedirects(response, reverse("core:home"))
+        self.assertRedirects(response, reverse("content:game_list"))
 
     def test_placeholders_are_available_for_authenticated_user(self) -> None:
         """Проверяет доступность заглушек профиля и энциклопедии после входа.

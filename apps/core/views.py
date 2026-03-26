@@ -28,36 +28,32 @@ def root_entry_view(request: HttpRequest) -> HttpResponse:
     """
 
     if request.user.is_authenticated:
-        return redirect("core:home")
+        return redirect("content:game_list")
     return redirect("accounts:login")
 
 
 @login_required
 def home_view(request: HttpRequest) -> HttpResponse:
-    """Отображает главную страницу с опубликованными играми и сценариями.
+    """Перенаправляет устаревший маршрут ``/home/`` на актуальный список игр.
 
     Контекст использования:
-        Является основной страницей после входа пользователя в систему.
+        Сохраняет обратную совместимость ранних этапов и переводит пользователя
+        на продуктовый экран ``/games/`` как главную страницу после входа.
 
     Параметры:
         request: HTTP-запрос авторизованного пользователя.
 
     Возвращаемое значение:
-        HTML-страница со списком игр, сценариев и навигацией по заглушкам.
+        Redirect на маршрут списка игр.
 
     Исключения и особые случаи:
-        Если опубликованных игр нет, отображается информативное пустое состояние.
+        Исключения не ожидаются.
 
     Побочные эффекты:
         Побочные эффекты отсутствуют.
     """
 
-    games = (
-        Game.objects.filter(is_published=True, is_archived=False)
-        .prefetch_related("scenarios")
-        .order_by("sort_order", "title")
-    )
-    return render(request, "core/home.html", {"games": games})
+    return redirect("content:game_list")
 
 
 @login_required

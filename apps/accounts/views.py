@@ -90,7 +90,7 @@ class RegisterView(View):
             user = form.save()
             login(request, user)
             messages.success(request, "Регистрация прошла успешно.")
-            return redirect("core:home")
+            return redirect("content:game_list")
         return render(request, self.template_name, {"form": form})
 
 
@@ -135,7 +135,7 @@ class LoginView(View):
         """
 
         if request.user.is_authenticated:
-            return redirect("core:home")
+            return redirect("content:game_list")
         form = EmailAuthenticationForm(request=request)
         return render(request, self.template_name, {"form": form})
 
@@ -181,7 +181,7 @@ class LoginView(View):
             if user is not None:
                 login(request, user)
                 reset_failed_attempts(email=email, ip_address=ip_address)
-                return redirect("core:home")
+                return redirect("content:game_list")
 
         attempts = register_failed_attempt(email=email, ip_address=ip_address)
         if attempts >= MAX_FAILED_ATTEMPTS:

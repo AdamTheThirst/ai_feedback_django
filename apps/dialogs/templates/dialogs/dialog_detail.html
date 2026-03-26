@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}Диалог{% endblock %}
+
+{% block content %}
+<header class="mb-3">
+    <h1 class="h5 mb-1">{{ dialog.game.title }} / {{ dialog.scenario.title }}</h1>
+    <p class="small text-muted mb-0">Осталось секунд: <span id="timer-value">{{ seconds_remaining }}</span></p>
+</header>
+
+<section class="card mb-3">
+    <div class="card-body py-2">
+        <div class="small text-muted">Условия сценария</div>
+        <div>{{ dialog.conditions_snapshot_text }}</div>
+    </div>
+</section>
+
+<section id="chat-messages" class="d-grid gap-2 mb-3">
+    {% for message in messages %}
+        <article class="card {% if message.role == 'user' %}border-primary{% else %}border-secondary{% endif %}">
+            <div class="card-body py-2">
+                <div class="small text-muted">{{ message.role }}</div>
+                <div>{{ message.text }}</div>
+            </div>
+        </article>
+    {% endfor %}
+</section>
+
+<div id="pending-indicator" class="alert alert-info py-2 d-none" role="status">
+    Думаю...
+</div>
+
+{% if can_send_message %}
+    <form id="send-form" class="d-grid gap-2">
+        {% csrf_token %}
+        <textarea id="message-text" class="form-control" rows="3" placeholder="Введите сообщение"></textarea>
+        <button type="submit" class="btn btn-primary">Отправить</button>
+    </form>
+{% else %}
+    <div class="alert alert-secondary">Диалог завершён. Отправка сообщений недоступна.</div>
+{% endif %}
+
+<script>
+(function () {
+    const form = document.getElementById('send-form');
+    if (!form) {
+        return;
+    }
+
+    const textarea = document.getElementById('message-text');
+    const messagesContainer = document.getElementById('chat-messages');
+    const pendingIndicator = document.getElementById('pending-indicator');
+    const timerValueNode = document.getElementById('timer-value');
+    const sendUrl = "{{ send_url }}";
+    const csrfToken = form.querySelector('input[name="csrfmiddlewaretoken"]').value;
+
+    function appendMessage(message) {
+        const card = document.createElement('article');
+        card.className = `card ${message.role === 'user' ? 'border-primary' : 'border-secondary'}`;
+        card.innerHTML = `<div class="card-body py-2"><div class="small text-muted">${message.role}</div><div>${message.text}</div></div>`;
+        messagesContainer.appendChild(card);
+        card.scrollIntoView({behavior: 'smooth', block: 'end'});
+    }
+
+    form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        const text = textarea.value.trim();
+        if (!text) {
+            return;
+        }
+
+        pendingIndicator.classList.remove('d-none');
+        textarea.disabled = true;
+
+        try {
+            const response = await fetch(sendUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                },
+                body: JSON.stringify({text: text}),
+            });
+            const payload = await response.json();
+            if (!payload.ok) {
+                alert(payload.message || 'Ошибка отправки сообщения.');
+                return;
+            }
+
+            appendMessage(payload.data.user_message);
+            appendMessage(payload.data.assistant_message);
+            timerValueNode.textContent = payload.data.dialog.seconds_remaining;
+            textarea.value = '';
+        } catch (error) {
+            alert('Ошибка сети при отправке сообщения.');
+        } finally {
+            pendingIndicator.classList.add('d-none');
+            textarea.disabled = false;
+            textarea.focus();
+        }
+    });
+})();
+</script>
+{% endblock %}

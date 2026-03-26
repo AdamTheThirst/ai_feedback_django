@@ -100,7 +100,7 @@ AUTH_USER_MODEL = "accounts.User"
 
 
 LOGIN_URL = "accounts:login"
-LOGIN_REDIRECT_URL = "core:home"
+LOGIN_REDIRECT_URL = "content:game_list"
 LOGOUT_REDIRECT_URL = "accounts:login"
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"

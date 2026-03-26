@@ -55,7 +55,7 @@ class AuthViewsTests(TestCase):
             },
         )
 
-        self.assertRedirects(response, reverse("core:home"))
+        self.assertRedirects(response, reverse("content:game_list"))
         created_user = User.objects.get(email="new.user@example.com")
         self.assertEqual(created_user.role, UserRole.USER)
         self.assertTrue(created_user.avatar_letter)
@@ -92,7 +92,7 @@ class AuthViewsTests(TestCase):
             data={"email": user.email, "password": "StrongPassword123"},
         )
 
-        self.assertRedirects(response, reverse("core:home"))
+        self.assertRedirects(response, reverse("content:game_list"))
 
     def test_logout_requires_post_and_redirects(self) -> None:
         """Проверяет выход по POST и редирект на публичный экран входа.
