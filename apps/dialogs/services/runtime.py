@@ -1,4 +1,4 @@
-"""Сервисные функции старта диалога и обработки сообщений runtime-чата."""
+"""Сервисные функции старта диалога, отправки сообщений и завершения сессии."""
 
 from dataclasses import dataclass
 from datetime import timedelta
@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.content.models import Scenario, ScenarioPrompt
 from apps.dialogs.models import (
+    DialogEndedReason,
     DialogMessage,
     DialogMessageRole,
     DialogSession,
@@ -19,26 +20,7 @@ from apps.platform_config.models import PlatformSettings
 
 @dataclass(slots=True)
 class SendMessageResult:
-    """Контейнер результата server-side обработки одной реплики пользователя.
-
-    Контекст использования:
-        Используется view-слоем JSON endpoint-а ``send-message`` для возврата
-        согласованной структуры с пользовательским и ответным сообщением.
-
-    Параметры:
-        dialog: Актуализированный объект диалоговой сессии.
-        user_message: Сохранённое сообщение пользователя.
-        assistant_message: Сохранённый ответ ассистента.
-
-    Возвращаемое значение:
-        Экземпляр dataclass с тремя связанными объектами ORM.
-
-    Исключения и особые случаи:
-        Исключения обрабатываются сервисом выше уровнем.
-
-    Побочные эффекты:
-        Побочные эффекты отсутствуют.
-    """
+    """Контейнер результата server-side обработки одной реплики пользователя."""
 
     dialog: DialogSession
     user_message: DialogMessage
@@ -50,51 +32,21 @@ class DuplicateSubmissionError(Exception):
 
 
 class DialogNotActiveError(Exception):
-    """Сигнализирует о попытке отправки сообщения в неактивный диалог."""
+    """Сигнализирует о попытке операции в неактивном диалоге."""
+
+
+class DuplicateFinishError(Exception):
+    """Сигнализирует о параллельной попытке завершения одного диалога."""
 
 
 def get_active_platform_settings() -> PlatformSettings | None:
-    """Возвращает активные платформенные настройки для snapshot диалога.
-
-    Контекст использования:
-        Нужен при старте диалога для фиксации лимитов и LLM-параметров
-        в полях ``DialogSession.effective_*``.
-
-    Параметры:
-        Параметры отсутствуют.
-
-    Возвращаемое значение:
-        Активная запись ``PlatformSettings`` или ``None``.
-
-    Исключения и особые случаи:
-        Если настроек нет, вызывающий код использует безопасные дефолты.
-
-    Побочные эффекты:
-        Побочные эффекты отсутствуют.
-    """
+    """Возвращает активные платформенные настройки для snapshot диалога."""
 
     return PlatformSettings.objects.filter(is_active=True).order_by("-id").first()
 
 
 def get_active_dialog_for_user(user_id: int) -> DialogSession | None:
-    """Возвращает текущий активный диалог пользователя, если он существует.
-
-    Контекст использования:
-        Используется в сценарии старта игры, чтобы не создавать второй
-        параллельный активный диалог и вернуть пользователя в существующий.
-
-    Параметры:
-        user_id: ID пользователя, для которого ищется активный диалог.
-
-    Возвращаемое значение:
-        ``DialogSession`` со статусом ``active`` или ``None``.
-
-    Исключения и особые случаи:
-        Особые исключения не предусмотрены.
-
-    Побочные эффекты:
-        Побочные эффекты отсутствуют.
-    """
+    """Возвращает текущий активный диалог пользователя, если он существует."""
 
     return (
         DialogSession.objects.filter(user_id=user_id, status=DialogSessionStatus.ACTIVE)
@@ -104,24 +56,7 @@ def get_active_dialog_for_user(user_id: int) -> DialogSession | None:
 
 
 def choose_active_scenario_prompt(scenario: Scenario) -> ScenarioPrompt | None:
-    """Выбирает активный игровой промт сценария для старта диалога.
-
-    Контекст использования:
-        Применяется перед созданием ``DialogSession`` для фиксации версии промта,
-        которая будет использоваться в рамках конкретного диалога.
-
-    Параметры:
-        scenario: Сценарий, для которого подбирается активный промт.
-
-    Возвращаемое значение:
-        Активный ``ScenarioPrompt`` или ``None``.
-
-    Исключения и особые случаи:
-        Если активный промт отсутствует, вызывающий слой должен остановить старт.
-
-    Побочные эффекты:
-        Побочные эффекты отсутствуют.
-    """
+    """Выбирает активный игровой промт сценария для старта диалога."""
 
     return (
         scenario.scenario_prompts.filter(is_active=True, is_archived=False)
@@ -131,25 +66,7 @@ def choose_active_scenario_prompt(scenario: Scenario) -> ScenarioPrompt | None:
 
 
 def create_dialog_session(user_id: int, scenario: Scenario, scenario_prompt: ScenarioPrompt) -> DialogSession:
-    """Создаёт новую активную сессию диалога и стартовое сообщение ассистента.
-
-    Контекст использования:
-        Используется endpoint-ом старта сценария для инициализации runtime-чата.
-
-    Параметры:
-        user_id: ID пользователя-владельца сессии.
-        scenario: Выбранный сценарий.
-        scenario_prompt: Активный промт сценария на момент старта.
-
-    Возвращаемое значение:
-        Созданный объект ``DialogSession``.
-
-    Исключения и особые случаи:
-        Потенциальные ошибки целостности БД пробрасываются выше.
-
-    Побочные эффекты:
-        Создаёт запись ``DialogSession`` и первое ``DialogMessage``.
-    """
+    """Создаёт новую активную сессию диалога и стартовое сообщение ассистента."""
 
     settings = get_active_platform_settings()
     duration_minutes = settings.default_dialog_duration_minutes if settings else 10
@@ -187,76 +104,24 @@ def create_dialog_session(user_id: int, scenario: Scenario, scenario_prompt: Sce
 
 
 def build_mock_assistant_reply(user_text: str) -> str:
-    """Генерирует временный ответ ассистента для runtime до интеграции LLM.
-
-    Контекст использования:
-        Используется на этапе чатового runtime, когда внешний LLM-клиент
-        ещё не подключён в отдельной итерации.
-
-    Параметры:
-        user_text: Текст последней реплики пользователя.
-
-    Возвращаемое значение:
-        Короткий текст ответа ассистента.
-
-    Исключения и особые случаи:
-        Пустой текст обрабатывается вызывающим слоем до вызова функции.
-
-    Побочные эффекты:
-        Побочные эффекты отсутствуют.
-    """
+    """Генерирует временный ответ ассистента до интеграции внешней LLM."""
 
     return f"Понял вас. Уточню: {user_text[:180]}"
 
 
-def _duplicate_lock_key(dialog_public_id: str) -> str:
-    """Возвращает cache-ключ блокировки повторной отправки сообщения.
+def _duplicate_lock_key(dialog_public_id: str, action: str) -> str:
+    """Возвращает cache-ключ блокировки повторной операции в диалоге."""
 
-    Контекст использования:
-        Применяется для простой server-side защиты от параллельных POST-запросов.
-
-    Параметры:
-        dialog_public_id: Публичный UUID диалога.
-
-    Возвращаемое значение:
-        Строковый cache-ключ.
-
-    Исключения и особые случаи:
-        Особые исключения отсутствуют.
-
-    Побочные эффекты:
-        Побочные эффекты отсутствуют.
-    """
-
-    return f"dialog_send_lock:{dialog_public_id}"
+    return f"dialog_lock:{action}:{dialog_public_id}"
 
 
 def send_user_message(dialog: DialogSession, text: str) -> SendMessageResult:
-    """Сохраняет реплику пользователя и создаёт один ответ ассистента.
-
-    Контекст использования:
-        Используется JSON endpoint-ом ``send-message`` для базового цикла
-        чата «user -> assistant» на одной странице без перезагрузки.
-
-    Параметры:
-        dialog: Активный диалог пользователя.
-        text: Текст пользовательской реплики.
-
-    Возвращаемое значение:
-        ``SendMessageResult`` с обновлённой сессией и двумя сообщениями.
-
-    Исключения и особые случаи:
-        Выбрасывает ``DialogNotActiveError`` и ``DuplicateSubmissionError``
-        при нарушении статуса или повторной отправке.
-
-    Побочные эффекты:
-        Создаёт две записи ``DialogMessage`` и обновляет счётчики диалога.
-    """
+    """Сохраняет реплику пользователя и создаёт один ответ ассистента."""
 
     if dialog.status != DialogSessionStatus.ACTIVE:
         raise DialogNotActiveError
 
-    lock_key = _duplicate_lock_key(str(dialog.public_id))
+    lock_key = _duplicate_lock_key(str(dialog.public_id), action="send")
     if not cache.add(lock_key, "1", timeout=5):
         raise DuplicateSubmissionError
 
@@ -311,24 +176,84 @@ def send_user_message(dialog: DialogSession, text: str) -> SendMessageResult:
         cache.delete(lock_key)
 
 
+def finish_dialog(dialog: DialogSession, reason: str) -> DialogSession:
+    """Завершает активный диалог вручную или по таймеру с защитой от дублей."""
+
+    if reason not in {DialogEndedReason.MANUAL_FEEDBACK, DialogEndedReason.TIMEOUT}:
+        raise ValueError("Недопустимая причина завершения диалога.")
+
+    lock_key = _duplicate_lock_key(str(dialog.public_id), action="finish")
+    if not cache.add(lock_key, "1", timeout=5):
+        raise DuplicateFinishError
+
+    try:
+        with transaction.atomic():
+            locked_dialog = DialogSession.objects.select_for_update().get(pk=dialog.pk)
+            if locked_dialog.status != DialogSessionStatus.ACTIVE:
+                raise DialogNotActiveError
+
+            if locked_dialog.user_message_count == 0:
+                locked_dialog.status = DialogSessionStatus.ANALYSIS_SKIPPED
+                locked_dialog.ended_reason = DialogEndedReason.NO_USER_MESSAGES
+            else:
+                locked_dialog.status = DialogSessionStatus.FINISHED
+                locked_dialog.ended_reason = reason
+
+            locked_dialog.ended_at = timezone.now()
+            locked_dialog.last_client_activity_at = timezone.now()
+            locked_dialog.save(
+                update_fields=[
+                    "status",
+                    "ended_reason",
+                    "ended_at",
+                    "last_client_activity_at",
+                    "updated_at",
+                ]
+            )
+            return locked_dialog
+    finally:
+        cache.delete(lock_key)
+
+
+def abandon_dialog(dialog: DialogSession, reason: str = DialogEndedReason.PAGE_LEAVE) -> DialogSession:
+    """Прерывает активный диалог при уходе пользователя со страницы чата."""
+
+    if reason not in {DialogEndedReason.PAGE_LEAVE, DialogEndedReason.INACTIVE_TIMEOUT}:
+        raise ValueError("Недопустимая причина прерывания диалога.")
+
+    lock_key = _duplicate_lock_key(str(dialog.public_id), action="abandon")
+    if not cache.add(lock_key, "1", timeout=5):
+        raise DuplicateFinishError
+
+    try:
+        with transaction.atomic():
+            locked_dialog = DialogSession.objects.select_for_update().get(pk=dialog.pk)
+            if locked_dialog.status != DialogSessionStatus.ACTIVE:
+                raise DialogNotActiveError
+
+            locked_dialog.status = DialogSessionStatus.ABORTED
+            locked_dialog.ended_reason = reason
+            now = timezone.now()
+            locked_dialog.ended_at = now
+            locked_dialog.client_aborted_at = now
+            locked_dialog.last_client_activity_at = now
+            locked_dialog.save(
+                update_fields=[
+                    "status",
+                    "ended_reason",
+                    "ended_at",
+                    "client_aborted_at",
+                    "last_client_activity_at",
+                    "updated_at",
+                ]
+            )
+            return locked_dialog
+    finally:
+        cache.delete(lock_key)
+
+
 def compute_seconds_remaining(dialog: DialogSession) -> int:
-    """Вычисляет оставшееся время активного диалога в секундах.
-
-    Контекст использования:
-        Нужно для отрисовки таймера на странице чата и JSON-ответов runtime.
-
-    Параметры:
-        dialog: Текущая диалоговая сессия.
-
-    Возвращаемое значение:
-        Неотрицательное целое число секунд до истечения лимита.
-
-    Исключения и особые случаи:
-        Для неактивного диалога возвращается ``0``.
-
-    Побочные эффекты:
-        Побочные эффекты отсутствуют.
-    """
+    """Вычисляет оставшееся время активного диалога в секундах."""
 
     if dialog.status != DialogSessionStatus.ACTIVE:
         return 0

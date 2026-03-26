@@ -26,33 +26,38 @@
     {% endfor %}
 </section>
 
-<div id="pending-indicator" class="alert alert-info py-2 d-none" role="status">
-    Думаю...
-</div>
+<div id="pending-indicator" class="alert alert-info py-2 d-none" role="status">Думаю...</div>
 
 {% if can_send_message %}
-    <form id="send-form" class="d-grid gap-2">
+    <form id="send-form" class="d-grid gap-2 mb-3">
         {% csrf_token %}
         <textarea id="message-text" class="form-control" rows="3" placeholder="Введите сообщение"></textarea>
         <button type="submit" class="btn btn-primary">Отправить</button>
     </form>
+    <button id="finish-button" type="button" class="btn btn-outline-danger w-100">Дай обратную связь</button>
 {% else %}
     <div class="alert alert-secondary">Диалог завершён. Отправка сообщений недоступна.</div>
+    <a href="{{ results_url }}" class="btn btn-primary w-100">Перейти к результату</a>
 {% endif %}
 
 <script>
 (function () {
     const form = document.getElementById('send-form');
-    if (!form) {
-        return;
-    }
-
+    const finishButton = document.getElementById('finish-button');
     const textarea = document.getElementById('message-text');
     const messagesContainer = document.getElementById('chat-messages');
     const pendingIndicator = document.getElementById('pending-indicator');
     const timerValueNode = document.getElementById('timer-value');
+
     const sendUrl = "{{ send_url }}";
-    const csrfToken = form.querySelector('input[name="csrfmiddlewaretoken"]').value;
+    const finishUrl = "{{ finish_url }}";
+    const abandonUrl = "{{ abandon_url }}";
+    const resultsUrl = "{{ results_url }}";
+    const csrfTokenInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+    const csrfToken = csrfTokenInput ? csrfTokenInput.value : '';
+
+    let dialogActive = {{ can_send_message|yesno:"true,false" }};
+    let secondsRemaining = Number(timerValueNode.textContent || 0);
 
     function appendMessage(message) {
         const card = document.createElement('article');
@@ -62,43 +67,125 @@
         card.scrollIntoView({behavior: 'smooth', block: 'end'});
     }
 
-    form.addEventListener('submit', async function (event) {
-        event.preventDefault();
-        const text = textarea.value.trim();
-        if (!text) {
+    async function finishDialog(reason) {
+        if (!dialogActive) {
             return;
         }
-
+        dialogActive = false;
         pendingIndicator.classList.remove('d-none');
-        textarea.disabled = true;
+        pendingIndicator.textContent = 'Завершаю диалог...';
 
         try {
-            const response = await fetch(sendUrl, {
+            const response = await fetch(finishUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': csrfToken,
                 },
-                body: JSON.stringify({text: text}),
+                body: JSON.stringify({reason: reason}),
             });
             const payload = await response.json();
             if (!payload.ok) {
-                alert(payload.message || 'Ошибка отправки сообщения.');
+                alert(payload.message || 'Не удалось завершить диалог.');
+                dialogActive = true;
                 return;
             }
 
-            appendMessage(payload.data.user_message);
-            appendMessage(payload.data.assistant_message);
-            timerValueNode.textContent = payload.data.dialog.seconds_remaining;
-            textarea.value = '';
+            if (reason === 'timeout') {
+                pendingIndicator.textContent = 'Время диалога истекло';
+                setTimeout(function () {
+                    window.location.href = payload.data.redirect_url || resultsUrl;
+                }, 3000);
+            } else {
+                window.location.href = payload.data.redirect_url || resultsUrl;
+            }
         } catch (error) {
-            alert('Ошибка сети при отправке сообщения.');
+            alert('Ошибка сети при завершении диалога.');
+            dialogActive = true;
         } finally {
-            pendingIndicator.classList.add('d-none');
-            textarea.disabled = false;
-            textarea.focus();
+            if (reason !== 'timeout') {
+                pendingIndicator.classList.add('d-none');
+            }
         }
-    });
+    }
+
+    if (form) {
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            if (!dialogActive) {
+                return;
+            }
+            const text = textarea.value.trim();
+            if (!text) {
+                return;
+            }
+
+            pendingIndicator.classList.remove('d-none');
+            textarea.disabled = true;
+
+            try {
+                const response = await fetch(sendUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken,
+                    },
+                    body: JSON.stringify({text: text}),
+                });
+                const payload = await response.json();
+                if (!payload.ok) {
+                    alert(payload.message || 'Ошибка отправки сообщения.');
+                    if (payload.code === 'dialog_not_active') {
+                        window.location.href = resultsUrl;
+                    }
+                    return;
+                }
+
+                appendMessage(payload.data.user_message);
+                appendMessage(payload.data.assistant_message);
+                timerValueNode.textContent = payload.data.dialog.seconds_remaining;
+                secondsRemaining = payload.data.dialog.seconds_remaining;
+                textarea.value = '';
+            } catch (error) {
+                alert('Ошибка сети при отправке сообщения.');
+            } finally {
+                pendingIndicator.classList.add('d-none');
+                textarea.disabled = false;
+                textarea.focus();
+            }
+        });
+    }
+
+    if (finishButton) {
+        finishButton.addEventListener('click', function () {
+            finishDialog('manual_feedback');
+        });
+    }
+
+    if (dialogActive) {
+        const timerId = setInterval(function () {
+            if (!dialogActive) {
+                clearInterval(timerId);
+                return;
+            }
+            secondsRemaining = Math.max(0, secondsRemaining - 1);
+            timerValueNode.textContent = String(secondsRemaining);
+            if (secondsRemaining === 0) {
+                clearInterval(timerId);
+                finishDialog('timeout');
+            }
+        }, 1000);
+
+        window.addEventListener('beforeunload', function () {
+            if (!dialogActive) {
+                return;
+            }
+            const beaconData = new FormData();
+            beaconData.append('csrfmiddlewaretoken', csrfToken);
+            beaconData.append('reason', 'page_leave');
+            navigator.sendBeacon(abandonUrl, beaconData);
+        });
+    }
 })();
 </script>
 {% endblock %}
