@@ -3,17 +3,47 @@
 {% block title %}Результат диалога{% endblock %}
 
 {% block content %}
-<div class="card shadow-sm">
+<div class="card shadow-sm mb-3">
     <div class="card-body">
         <h1 class="h5">Результат диалога</h1>
         <p class="mb-1"><strong>Игра:</strong> {{ dialog.game.title }}</p>
         <p class="mb-1"><strong>Сценарий:</strong> {{ dialog.scenario.title }}</p>
         <p class="mb-1"><strong>Статус:</strong> {{ dialog.status }}</p>
-        <p class="mb-3"><strong>Причина завершения:</strong> {{ dialog.ended_reason|default:"—" }}</p>
-        <div class="alert alert-secondary mb-3">
-            Аналитика будет добавлена на следующем этапе. Сейчас отображается финальное состояние диалога.
-        </div>
-        <a href="{% url 'content:game_list' %}" class="btn btn-primary">К списку игр</a>
+        <p class="mb-0"><strong>Причина завершения:</strong> {{ dialog.ended_reason|default:"—" }}</p>
     </div>
 </div>
+
+{% if analysis_run %}
+    <div class="card shadow-sm mb-3">
+        <div class="card-body">
+            <div class="h6 mb-1">Сумма: {{ total_score }} из {{ total_max }}</div>
+            <div class="small text-muted">Статус анализа: {{ analysis_run.status }}</div>
+        </div>
+    </div>
+
+    <section class="d-grid gap-2 mb-3">
+        {% for result in analysis_results %}
+            <article class="card">
+                <div class="card-body py-2">
+                    <div class="fw-semibold">{{ result.header_snapshot_text }}</div>
+                    <div class="small text-muted mb-1">{{ result.rating }} из {{ result.rating_max }}</div>
+                    <div>{{ result.analysis_text }}</div>
+                    {% if result.validation_status != 'valid' %}
+                        <div class="small text-warning mt-1">Статус валидации: {{ result.validation_status }}</div>
+                    {% endif %}
+                </div>
+            </article>
+        {% endfor %}
+    </section>
+{% elif dialog.status == 'analysis_skipped' %}
+    <div class="alert alert-secondary mb-3">
+        Анализ пропущен, потому что в диалоге не было пользовательских реплик.
+    </div>
+{% else %}
+    <div class="alert alert-secondary mb-3">
+        Анализ ещё не сформирован или завершился с ошибкой.
+    </div>
+{% endif %}
+
+<a href="{% url 'content:game_list' %}" class="btn btn-primary">К списку игр</a>
 {% endblock %}

@@ -8,6 +8,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.analysis.services.runner import run_analysis_for_dialog
 from apps.content.models import Scenario
 from apps.dialogs.models import DialogMessage, DialogSession, DialogSessionStatus
 from apps.dialogs.services.runtime import (
@@ -114,10 +115,33 @@ def dialog_detail_view(request: HttpRequest, dialog_public_id: str) -> HttpRespo
 @login_required
 @require_GET
 def dialog_results_view(request: HttpRequest, dialog_public_id: str) -> HttpResponse:
-    """Показывает финальное состояние диалога до этапа полноценной аналитики."""
+    """Показывает финальное состояние диалога и результаты анализа при наличии."""
 
-    dialog = get_object_or_404(DialogSession, public_id=dialog_public_id, user=request.user)
-    return render(request, "dialogs/dialog_results.html", {"dialog": dialog})
+    dialog = get_object_or_404(
+        DialogSession.objects.select_related("analysis_run", "game", "scenario"),
+        public_id=dialog_public_id,
+        user=request.user,
+    )
+    analysis_run = getattr(dialog, "analysis_run", None)
+    analysis_results = []
+    total_score = 0
+    total_max = 0
+    if analysis_run is not None:
+        analysis_results = list(analysis_run.results.order_by("sort_order_snapshot", "id"))
+        total_score = sum(item.rating for item in analysis_results)
+        total_max = sum(item.rating_max for item in analysis_results)
+
+    return render(
+        request,
+        "dialogs/dialog_results.html",
+        {
+            "dialog": dialog,
+            "analysis_run": analysis_run,
+            "analysis_results": analysis_results,
+            "total_score": total_score,
+            "total_max": total_max,
+        },
+    )
 
 
 @login_required
@@ -198,6 +222,9 @@ def finish_dialog_view(request: HttpRequest, dialog_public_id: str) -> JsonRespo
     except DialogNotActiveError:
         return JsonResponse({"ok": False, "code": "dialog_not_active", "message": "Диалог уже завершён.", "data": {"dialog": _dialog_to_payload(dialog)}}, status=409)
 
+    if updated_dialog.user_message_count > 0:
+        run_analysis_for_dialog(updated_dialog)
+
     return JsonResponse(
         {
             "ok": True,
@@ -232,6 +259,9 @@ def abandon_dialog_view(request: HttpRequest, dialog_public_id: str) -> JsonResp
         return JsonResponse({"ok": False, "code": "duplicate_abandon_blocked", "message": "Повторный abandon заблокирован.", "data": {}}, status=409)
     except DialogNotActiveError:
         return JsonResponse({"ok": False, "code": "dialog_not_active", "message": "Диалог уже завершён.", "data": {"dialog": _dialog_to_payload(dialog)}}, status=409)
+
+    if updated_dialog.user_message_count > 0:
+        run_analysis_for_dialog(updated_dialog)
 
     return JsonResponse(
         {
