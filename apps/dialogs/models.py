@@ -171,7 +171,7 @@ class DialogSession(UUIDPublicIdModel, TimestampedModel):
             ),
         ]
         indexes = [
-            models.Index(fields=["user", "status"], name="dialogs_session_user_status_idx"),
+            models.Index(fields=["user", "status"], name="dlg_sess_user_status_idx"),
             models.Index(fields=["game"], name="dialogs_session_game_idx"),
             models.Index(fields=["scenario"], name="dialogs_session_scenario_idx"),
             models.Index(fields=["started_at"], name="dialogs_session_started_idx"),

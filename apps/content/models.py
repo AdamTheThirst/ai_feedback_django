@@ -341,7 +341,7 @@ class AnalysisPrompt(UUIDPublicIdModel, TimestampedModel, ArchivableModel, Owned
             ),
         ]
         indexes = [
-            models.Index(fields=["game", "sort_order", "is_active"], name="content_ap_game_sort_active_idx"),
+            models.Index(fields=["game", "sort_order", "is_active"], name="cnt_ap_game_sort_act_idx"),
         ]
 
     def __str__(self) -> str:

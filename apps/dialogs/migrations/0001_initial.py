@@ -70,7 +70,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="dialogsession",
-            index=models.Index(fields=["user", "status"], name="dialogs_session_user_status_idx"),
+            index=models.Index(fields=["user", "status"], name="dlg_sess_user_status_idx"),
         ),
         migrations.AddIndex(
             model_name="dialogsession",
