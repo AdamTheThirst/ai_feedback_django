@@ -125,3 +125,35 @@ class AuthViewsTests(TestCase):
         response = self.client.post(reverse("accounts:logout"))
 
         self.assertRedirects(response, reverse("accounts:login"))
+
+    def test_create_superuser_works_with_email_without_username(self) -> None:
+        """Проверяет создание суперпользователя без параметра username.
+
+        Контекст использования:
+            Закрывает регрессию команды ``createsuperuser`` для кастомной
+            модели пользователя с ``USERNAME_FIELD = email``.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; выполняет проверки флагов и роли.
+
+        Исключения и особые случаи:
+            При некорректной сигнатуре менеджера тест завершится ошибкой.
+
+        Побочные эффекты:
+            Создаёт суперпользователя в тестовой БД.
+        """
+
+        superuser = User.objects.create_superuser(
+            email="super@example.com",
+            nickname="Супер",
+            password="StrongPassword123",
+        )
+
+        self.assertTrue(superuser.is_staff)
+        self.assertTrue(superuser.is_superuser)
+        self.assertEqual(superuser.role, UserRole.SUPERADMIN)
+        self.assertTrue(superuser.avatar_letter)
+        self.assertTrue(superuser.avatar_bg_hex)
