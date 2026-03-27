@@ -9,9 +9,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.analysis.services.runner import run_analysis_for_dialog
+from apps.auditlog.services import log_audit_event, log_security_warning
 from apps.content.models import Scenario
 from apps.dialogs.models import DialogMessage, DialogSession, DialogSessionStatus
 from apps.dialogs.services.results import build_dialog_results_view_model
+from apps.dialogs.services.security import consume_send_message_rate_limit
 from apps.dialogs.services.runtime import (
     DialogNotActiveError,
     DuplicateFinishError,
@@ -25,7 +27,7 @@ from apps.dialogs.services.runtime import (
     send_user_message,
 )
 from apps.exports.services.pdf import PdfExportError, build_dialog_results_pdf
-from apps.auditlog.models import AuditLogEntry, AuditLogLevel
+from apps.auditlog.models import AuditLogLevel
 
 
 def _dialog_to_payload(dialog: DialogSession) -> dict:
@@ -189,20 +191,27 @@ def export_dialog_pdf_view(request: HttpRequest, dialog_public_id: str) -> HttpR
     )
     view_model = build_dialog_results_view_model(dialog)
     if view_model.analysis_run is None:
+        log_security_warning(
+            event_type="pdf.export_without_analysis",
+            message="Попытка экспорта PDF до готовности анализа.",
+            actor_user_id=request.user.id,
+            dialog=dialog,
+            context_json={"dialog_public_id": str(dialog.public_id)},
+        )
         messages.error(request, "Экспорт пока недоступен: анализ ещё не сформирован.")
         return redirect("dialogs:dialog_results", dialog_public_id=dialog.public_id)
 
     try:
         pdf_bytes = build_dialog_results_pdf(view_model)
     except PdfExportError as exc:
-        AuditLogEntry.objects.create(
+        log_audit_event(
             level=AuditLogLevel.ERROR,
             event_type="pdf.export_failed",
             message="Ошибка генерации PDF для диалога.",
-            actor_user=request.user,
+            actor_user_id=request.user.id,
             dialog=dialog,
             context_json={"dialog_public_id": str(dialog.public_id)},
-            traceback_text=str(exc),
+            exception=exc,
         )
         messages.error(request, "Не удалось сформировать PDF. Попробуйте ещё раз позже.")
         return redirect("dialogs:dialog_results", dialog_public_id=dialog.public_id)
@@ -218,17 +227,61 @@ def send_message_view(request: HttpRequest, dialog_public_id: str) -> JsonRespon
     """Сохраняет пользовательскую реплику и возвращает JSON с ответом ассистента."""
 
     dialog = get_object_or_404(DialogSession, public_id=dialog_public_id, user=request.user)
+    if request.content_type != "application/json":
+        log_security_warning(
+            event_type="dialogs.send.invalid_content_type",
+            message="Отклонена отправка сообщения с некорректным content-type.",
+            actor_user_id=request.user.id,
+            dialog=dialog,
+            context_json={"content_type": request.content_type or ""},
+        )
+        return JsonResponse(
+            {"ok": False, "code": "unsupported_content_type", "message": "Требуется application/json.", "data": {}},
+            status=415,
+        )
+
+    if not consume_send_message_rate_limit(user_id=request.user.id, dialog_public_id=str(dialog.public_id)):
+        log_security_warning(
+            event_type="dialogs.send.rate_limited",
+            message="Сработал rate-limit отправки сообщений диалога.",
+            actor_user_id=request.user.id,
+            dialog=dialog,
+            context_json={"dialog_public_id": str(dialog.public_id)},
+        )
+        return JsonResponse(
+            {"ok": False, "code": "rate_limited", "message": "Слишком много запросов. Повторите позже.", "data": {}},
+            status=429,
+        )
 
     try:
         payload = json.loads(request.body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
+        log_security_warning(
+            event_type="dialogs.send.invalid_json",
+            message="Отклонена отправка сообщения с невалидным JSON.",
+            actor_user_id=request.user.id,
+            dialog=dialog,
+        )
         return JsonResponse({"ok": False, "code": "invalid_json", "message": "Некорректный JSON.", "data": {}}, status=400)
 
     text = (payload.get("text") or "").strip()
     if not text:
+        log_security_warning(
+            event_type="dialogs.send.empty_message",
+            message="Отклонена отправка пустого сообщения.",
+            actor_user_id=request.user.id,
+            dialog=dialog,
+        )
         return JsonResponse({"ok": False, "code": "empty_message", "message": "Сообщение пустое.", "data": {}}, status=400)
 
     if len(text) > dialog.effective_user_message_max_chars:
+        log_security_warning(
+            event_type="dialogs.send.message_too_long",
+            message="Отклонена отправка слишком длинного сообщения.",
+            actor_user_id=request.user.id,
+            dialog=dialog,
+            context_json={"max_chars": dialog.effective_user_message_max_chars, "actual_chars": len(text)},
+        )
         return JsonResponse(
             {
                 "ok": False,
@@ -284,6 +337,13 @@ def finish_dialog_view(request: HttpRequest, dialog_public_id: str) -> JsonRespo
     try:
         updated_dialog = finish_dialog(dialog=dialog, reason=reason)
     except ValueError:
+        log_security_warning(
+            event_type="dialogs.finish.invalid_reason",
+            message="Отклонена попытка finish с недопустимой причиной.",
+            actor_user_id=request.user.id,
+            dialog=dialog,
+            context_json={"reason": reason},
+        )
         return JsonResponse({"ok": False, "code": "invalid_reason", "message": "Недопустимая причина завершения.", "data": {}}, status=400)
     except DuplicateFinishError:
         return JsonResponse({"ok": False, "code": "duplicate_finish_blocked", "message": "Повторное завершение заблокировано.", "data": {}}, status=409)
@@ -322,6 +382,13 @@ def abandon_dialog_view(request: HttpRequest, dialog_public_id: str) -> JsonResp
     try:
         updated_dialog = abandon_dialog(dialog=dialog, reason=reason)
     except ValueError:
+        log_security_warning(
+            event_type="dialogs.abandon.invalid_reason",
+            message="Отклонена попытка abandon с недопустимой причиной.",
+            actor_user_id=request.user.id,
+            dialog=dialog,
+            context_json={"reason": reason},
+        )
         return JsonResponse({"ok": False, "code": "invalid_reason", "message": "Недопустимая причина прерывания.", "data": {}}, status=400)
     except DuplicateFinishError:
         return JsonResponse({"ok": False, "code": "duplicate_abandon_blocked", "message": "Повторный abandon заблокирован.", "data": {}}, status=409)

@@ -12,7 +12,8 @@ from apps.analysis.models import (
     AnalysisRunStatus,
     AnalysisValidationStatus,
 )
-from apps.auditlog.models import AuditLogEntry, AuditLogLevel
+from apps.auditlog.models import AuditLogLevel
+from apps.auditlog.services import log_audit_event
 from apps.content.models import AnalysisPrompt
 from apps.dialogs.models import DialogSession
 
@@ -161,11 +162,11 @@ def _save_audit_event(event_type: str, message: str, dialog: DialogSession, cont
         Создаёт запись ``AuditLogEntry`` в БД.
     """
 
-    AuditLogEntry.objects.create(
+    log_audit_event(
         level=AuditLogLevel.WARNING,
         event_type=event_type,
         message=message,
-        actor_user=dialog.user,
+        actor_user_id=dialog.user_id,
         dialog=dialog,
         context_json=context_json,
     )

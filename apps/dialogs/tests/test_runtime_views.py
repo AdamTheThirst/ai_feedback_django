@@ -1,12 +1,14 @@
 """Smoke-тесты runtime: старт, отправка и завершение диалоговой сессии."""
 
 import json
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
 
 from apps.analysis.models import AnalysisRun
 from apps.accounts.models import User
+from apps.auditlog.models import AuditLogEntry
 from apps.content.models import AnalysisPrompt, Game, Scenario, ScenarioPrompt
 from apps.dialogs.models import DialogEndedReason, DialogMessageRole, DialogSession, DialogSessionStatus
 
@@ -145,6 +147,78 @@ class DialogRuntimeTests(TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["data"]["user_message"]["role"], "user")
         self.assertEqual(payload["data"]["assistant_message"]["role"], "assistant")
+
+    def test_send_message_rejects_non_json_content_type(self) -> None:
+        """Проверяет отклонение send-message без application/json.
+
+        Контекст использования:
+            Покрывает hardening-контракт endpoint-а, чтобы сервер не принимал
+            произвольный content-type для JSON-операции отправки сообщения.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; выполняет проверки статуса и кода ошибки.
+
+        Исключения и особые случаи:
+            При нарушении контракта endpoint-а тест падает.
+
+        Побочные эффекты:
+            Создаёт активный диалог для отправки запроса.
+        """
+
+        self.client.force_login(self.user)
+        dialog = self._start_dialog()
+
+        response = self.client.post(
+            reverse("dialogs:send_message", kwargs={"dialog_public_id": dialog.public_id}),
+            data={"text": "Не JSON payload"},
+        )
+
+        self.assertEqual(response.status_code, 415)
+        self.assertEqual(response.json()["code"], "unsupported_content_type")
+        self.assertTrue(AuditLogEntry.objects.filter(event_type="dialogs.send.invalid_content_type").exists())
+
+    def test_send_message_rate_limit_returns_429(self) -> None:
+        """Проверяет, что rate-limit блокирует слишком частые отправки.
+
+        Контекст использования:
+            Закрывает security-сценарий защиты от burst-спама на send endpoint.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; проверяет код ошибки и HTTP-статус.
+
+        Исключения и особые случаи:
+            Лимит временно занижается через patch только внутри теста.
+
+        Побочные эффекты:
+            Создаёт активный диалог и выполняет серию POST-запросов.
+        """
+
+        self.client.force_login(self.user)
+        dialog = self._start_dialog()
+        endpoint = reverse("dialogs:send_message", kwargs={"dialog_public_id": dialog.public_id})
+
+        with patch("apps.dialogs.views.consume_send_message_rate_limit", side_effect=[True, False]):
+            first_response = self.client.post(
+                endpoint,
+                data=json.dumps({"text": "Первое сообщение"}),
+                content_type="application/json",
+            )
+            second_response = self.client.post(
+                endpoint,
+                data=json.dumps({"text": "Второе сообщение"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 429)
+        self.assertEqual(second_response.json()["code"], "rate_limited")
+        self.assertTrue(AuditLogEntry.objects.filter(event_type="dialogs.send.rate_limited").exists())
 
     def test_finish_manual_sets_finished_or_analysis_skipped(self) -> None:
         """Проверяет ручное завершение с правильным конечным статусом диалога."""
