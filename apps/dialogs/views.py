@@ -227,7 +227,8 @@ def send_message_view(request: HttpRequest, dialog_public_id: str) -> JsonRespon
     """Сохраняет пользовательскую реплику и возвращает JSON с ответом ассистента."""
 
     dialog = get_object_or_404(DialogSession, public_id=dialog_public_id, user=request.user)
-    if request.content_type != "application/json":
+    content_type = (request.content_type or "").lower()
+    if not content_type.startswith("application/json"):
         log_security_warning(
             event_type="dialogs.send.invalid_content_type",
             message="Отклонена отправка сообщения с некорректным content-type.",

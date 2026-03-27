@@ -52,11 +52,12 @@ def consume_send_message_rate_limit(user_id: int, dialog_public_id: str) -> bool
     """
 
     key = _build_send_rate_limit_key(user_id=user_id, dialog_public_id=dialog_public_id)
-    current_value = cache.get(key)
-    if current_value is None:
-        cache.set(key, 1, RATE_LIMIT_WINDOW_SECONDS)
+    if cache.add(key, 1, RATE_LIMIT_WINDOW_SECONDS):
         return True
 
-    current_value = int(current_value) + 1
-    cache.set(key, current_value, RATE_LIMIT_WINDOW_SECONDS)
-    return current_value <= RATE_LIMIT_MAX_REQUESTS
+    try:
+        current_value = cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, RATE_LIMIT_WINDOW_SECONDS)
+        return True
+    return int(current_value) <= RATE_LIMIT_MAX_REQUESTS
