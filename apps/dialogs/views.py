@@ -5,6 +5,7 @@ import json
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http.request import RawPostDataException
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
@@ -56,6 +57,48 @@ def _message_to_payload(message: DialogMessage) -> dict:
         "char_count": message.char_count,
         "created_at": message.created_at.isoformat().replace("+00:00", "Z"),
     }
+
+
+def _extract_request_payload(request: HttpRequest) -> dict:
+    """Безопасно извлекает payload из JSON-body или form-urlencoded POST.
+
+    Контекст использования:
+        Нужен для runtime endpoint-ов диалога, куда запрос может приходить как
+        ``application/json`` (обычный fetch), так и ``form-urlencoded``/beacon.
+        Отдельно обрабатывает кейс, когда тело запроса уже было прочитано
+        промежуточным слоем Django и повторный доступ к ``request.body`` даёт
+        ``RawPostDataException``.
+
+    Параметры:
+        request: Текущий ``HttpRequest`` со входными данными POST-запроса.
+
+    Возвращаемое значение:
+        Словарь payload. Если JSON невалиден или отсутствует, возвращается
+        словарь, собранный из ``request.POST``. Если данных нет, возвращается
+        пустой словарь.
+
+    Исключения и особые случаи:
+        ``RawPostDataException`` и ``JSONDecodeError`` считаются штатными
+        сценариями деградации и не пробрасываются наружу.
+
+    Побочные эффекты:
+        Может инициировать чтение ``request.POST`` для fallback-разбора формы.
+    """
+
+    try:
+        raw_body = request.body.decode("utf-8") or ""
+    except RawPostDataException:
+        return request.POST.dict()
+
+    if raw_body:
+        try:
+            payload = json.loads(raw_body)
+            if isinstance(payload, dict):
+                return payload
+        except json.JSONDecodeError:
+            pass
+
+    return request.POST.dict()
 
 
 @login_required
@@ -329,10 +372,7 @@ def finish_dialog_view(request: HttpRequest, dialog_public_id: str) -> JsonRespo
 
     dialog = get_object_or_404(DialogSession, public_id=dialog_public_id, user=request.user)
 
-    try:
-        payload = json.loads(request.body.decode("utf-8") or "{}")
-    except json.JSONDecodeError:
-        payload = {}
+    payload = _extract_request_payload(request)
 
     reason = payload.get("reason") or "manual_feedback"
     try:
@@ -374,12 +414,8 @@ def abandon_dialog_view(request: HttpRequest, dialog_public_id: str) -> JsonResp
 
     dialog = get_object_or_404(DialogSession, public_id=dialog_public_id, user=request.user)
 
-    try:
-        payload = json.loads(request.body.decode("utf-8") or "{}")
-    except json.JSONDecodeError:
-        payload = {}
-
-    reason = payload.get("reason") or request.POST.get("reason") or "page_leave"
+    payload = _extract_request_payload(request)
+    reason = payload.get("reason") or "page_leave"
     try:
         updated_dialog = abandon_dialog(dialog=dialog, reason=reason)
     except ValueError:
