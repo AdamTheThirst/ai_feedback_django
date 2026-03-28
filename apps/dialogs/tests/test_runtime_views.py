@@ -8,6 +8,7 @@ from django.urls import reverse
 
 from apps.analysis.models import AnalysisRun
 from apps.accounts.models import User
+from apps.accounts.models import UserRole
 from apps.auditlog.models import AuditLogEntry
 from apps.content.models import AnalysisPrompt, Game, Scenario, ScenarioPrompt
 from apps.dialogs.models import DialogEndedReason, DialogMessageRole, DialogSession, DialogSessionStatus
@@ -185,6 +186,57 @@ class DialogRuntimeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["data"]["assistant_message"]["text"], "Ответ персонажа из LLM")
+
+    @patch("apps.dialogs.services.runtime.call_chat_completion")
+    @patch("apps.dialogs.services.runtime.get_active_platform_settings")
+    def test_send_message_returns_diagnostic_error_for_admin_chat(self, settings_mock, llm_mock) -> None:
+        """Проверяет диагностическое сообщение об ошибке AI для администратора.
+
+        Контекст использования:
+            Нужен для локальной отладки интеграции с LLM: администратор должен
+            увидеть в чате не только fallback, но и описание причины сбоя.
+
+        Параметры:
+            settings_mock: Мок активных PlatformSettings.
+            llm_mock: Мок вызова внешнего LLM-клиента.
+
+        Возвращаемое значение:
+            Ничего не возвращает; выполняет проверки JSON-ответа runtime endpoint-а.
+
+        Исключения и особые случаи:
+            Если endpoint не вернул диагностический текст, тест падает.
+
+        Побочные эффекты:
+            Создаёт отдельного admin-пользователя и запускает диалог в тестовой БД.
+        """
+
+        settings_mock.return_value = None
+        llm_mock.side_effect = RuntimeError("Connection refused")
+
+        admin_user = User.objects.create_user(
+            email="admin.chat@example.com",
+            nickname="Админ-чат",
+            password="StrongPassword123",
+            role=UserRole.ADMIN,
+            is_staff=True,
+            avatar_letter="А",
+            avatar_bg_hex="#D6E8FF",
+        )
+        self.client.force_login(admin_user)
+        self.client.get(reverse("dialogs:start_scenario", kwargs={"scenario_slug": self.scenario.slug}))
+        admin_dialog = DialogSession.objects.get(user=admin_user, status=DialogSessionStatus.ACTIVE)
+
+        response = self.client.post(
+            reverse("dialogs:send_message", kwargs={"dialog_public_id": admin_dialog.public_id}),
+            data=json.dumps({"text": "Проверка подключения"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        assistant_text = response.json()["data"]["assistant_message"]["text"]
+        self.assertIn("Ошибка подключения к AI", assistant_text)
+        self.assertIn("RuntimeError", assistant_text)
+        self.assertIn("Connection refused", assistant_text)
 
     def test_send_message_rejects_non_json_content_type(self) -> None:
         """Проверяет отклонение send-message без application/json.

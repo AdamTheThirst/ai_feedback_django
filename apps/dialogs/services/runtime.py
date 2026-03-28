@@ -195,13 +195,52 @@ def generate_assistant_reply(dialog: DialogSession, user_text: str, settings: Pl
         Выполняет сетевые LLM-запросы и пишет технические события в аудит-лог.
     """
 
+    reply, error_message = get_chat_reply_or_error(dialog=dialog, user_text=user_text, settings=settings)
+    if reply:
+        return reply
+
+    if dialog.user.can_access_backoffice and error_message:
+        return error_message[: dialog.effective_game_reply_max_chars]
+
+    if error_message:
+        return "Извините, не удалось получить ответ от модели. Попробуйте отправить сообщение ещё раз."
+    return "Извините, временно недоступно. Попробуйте ещё раз."
+
+
+def get_chat_reply_or_error(dialog: DialogSession, user_text: str, settings: PlatformSettings | None) -> tuple[str | None, str | None]:
+    """Возвращает ответ LLM или диагностическое описание ошибки подключения.
+
+    Контекст использования:
+        Это специальная функция для runtime-чата, которая нужна в том числе
+        административным пользователям, чтобы видеть, где именно ломается
+        подключение к AI (конфигурация, сеть, пустой ответ и т.д.).
+
+    Параметры:
+        dialog: Активный диалог с параметрами лимитов и пользователем-владельцем.
+        user_text: Последняя реплика пользователя для формирования контекста.
+        settings: Активные платформенные настройки LLM или ``None``.
+
+    Возвращаемое значение:
+        Кортеж ``(reply, error_message)``:
+        - при успехе ``reply`` содержит текст ассистента, ``error_message`` равен ``None``;
+        - при ошибке ``reply`` равен ``None``, а ``error_message`` содержит
+          понятное техническое описание причины.
+
+    Исключения и особые случаи:
+        Внутренние исключения LLM не пробрасываются наружу, а конвертируются
+        в диагностическое сообщение и логируются в аудит.
+
+    Побочные эффекты:
+        Выполняет сетевые LLM-запросы и записывает предупреждения в аудит-лог.
+    """
+
     messages = build_game_llm_messages(dialog=dialog, user_text=user_text)
     last_error: Exception | None = None
     for attempt in range(1, LLM_DIALOG_ATTEMPTS + 1):
         try:
             reply = call_chat_completion(messages=messages, settings=settings, for_analysis=False)
             if reply:
-                return reply[: dialog.effective_game_reply_max_chars]
+                return reply[: dialog.effective_game_reply_max_chars], None
             raise ValueError("LLM вернула пустой ответ в игровом диалоге.")
         except Exception as exc:  # noqa: BLE001
             last_error = exc
@@ -217,9 +256,14 @@ def generate_assistant_reply(dialog: DialogSession, user_text: str, settings: Pl
             if isinstance(exc, LLMConfigurationError):
                 break
 
-    if last_error is not None:
-        return "Извините, не удалось получить ответ от модели. Попробуйте отправить сообщение ещё раз."
-    return "Извините, временно недоступно. Попробуйте ещё раз."
+    if last_error is None:
+        return None, "Ошибка подключения к AI: неизвестная причина."
+
+    error_message = (
+        "Ошибка подключения к AI: "
+        f"{last_error.__class__.__name__}: {last_error}"
+    )
+    return None, error_message
 
 
 def _duplicate_lock_key(dialog_public_id: str, action: str) -> str:
