@@ -148,6 +148,44 @@ class DialogRuntimeTests(TestCase):
         self.assertEqual(payload["data"]["user_message"]["role"], "user")
         self.assertEqual(payload["data"]["assistant_message"]["role"], "assistant")
 
+    @patch("apps.dialogs.services.runtime.call_chat_completion")
+    @patch("apps.dialogs.services.runtime.get_active_platform_settings")
+    def test_send_message_uses_llm_response_text(self, settings_mock, llm_mock) -> None:
+        """Проверяет, что runtime использует ответ LLM в реплике персонажа.
+
+        Контекст использования:
+            Подтверждает, что заглушка удалена и сообщение ассистента берётся
+            из внешнего LLM-вызова (замоканного в тесте).
+
+        Параметры:
+            settings_mock: Мок платформенных настроек.
+            llm_mock: Мок OpenAI-compatible вызова.
+
+        Возвращаемое значение:
+            Ничего не возвращает; проверяет JSON ответа endpoint-а.
+
+        Исключения и особые случаи:
+            Исключения не ожидаются при корректных моках.
+
+        Побочные эффекты:
+            Создаёт и использует активный диалог в тестовой БД.
+        """
+
+        settings_mock.return_value = None
+        llm_mock.return_value = "Ответ персонажа из LLM"
+        self.client.force_login(self.user)
+        dialog = self._start_dialog()
+
+        response = self.client.post(
+            reverse("dialogs:send_message", kwargs={"dialog_public_id": dialog.public_id}),
+            data=json.dumps({"text": "Привет"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["data"]["assistant_message"]["text"], "Ответ персонажа из LLM")
+
     def test_send_message_rejects_non_json_content_type(self) -> None:
         """Проверяет отклонение send-message без application/json.
 

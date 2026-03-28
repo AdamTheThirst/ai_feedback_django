@@ -249,3 +249,112 @@ class ScenarioMediaAssetForm(BackofficeBaseForm):
             self.fields["previous_version"].queryset = ScenarioMediaAsset.objects.filter(
                 uploaded_by=user
             )
+
+
+class UserCreateForm(forms.Form):
+    """Форма создания пользователя супер-администратором в бэкофисе.
+
+    Контекст использования:
+        Применяется в отдельном разделе управления пользователями, доступном
+        только роли ``superadmin`` для ручного заведения учётных записей.
+
+    Параметры:
+        Принимает email, nickname, пароль, роль и признак активности.
+
+    Возвращаемое значение:
+        Валидированные данные для создания ``accounts.User``.
+
+    Исключения и особые случаи:
+        Проверяет совпадение двух полей пароля и уникальность email.
+
+    Побочные эффекты:
+        В методе ``save`` создаёт нового пользователя в БД.
+    """
+
+    email = forms.EmailField(label="Email")
+    nickname = forms.CharField(max_length=150, label="Никнейм")
+    role = forms.ChoiceField(choices=UserRole.choices, label="Роль")
+    is_active = forms.BooleanField(required=False, initial=True, label="Активен")
+    password1 = forms.CharField(widget=forms.PasswordInput, label="Пароль")
+    password2 = forms.CharField(widget=forms.PasswordInput, label="Пароль ещё раз")
+
+    def clean_email(self) -> str:
+        """Проверяет уникальность email для новой учётной записи.
+
+        Контекст использования:
+            Вызывается при валидации формы перед созданием пользователя.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Нормализованный email из формы.
+
+        Исключения и особые случаи:
+            Бросает ``ValidationError``, если email уже занят.
+
+        Побочные эффекты:
+            Выполняет запрос в БД.
+        """
+
+        email = self.cleaned_data["email"]
+        if User.objects.filter(email=email).exists():
+            raise forms.ValidationError("Пользователь с таким email уже существует.")
+        return email
+
+    def clean(self) -> dict:
+        """Проверяет совпадение полей пароля перед созданием пользователя.
+
+        Контекст использования:
+            Нужен для защиты от случайного ввода разных паролей оператором.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Словарь очищенных данных формы.
+
+        Исключения и особые случаи:
+            Добавляет ошибку формы при несовпадении паролей.
+
+        Побочные эффекты:
+            Побочные эффекты отсутствуют.
+        """
+
+        cleaned_data = super().clean()
+        password1 = cleaned_data.get("password1")
+        password2 = cleaned_data.get("password2")
+        if password1 and password2 and password1 != password2:
+            self.add_error("password2", "Пароли не совпадают.")
+        return cleaned_data
+
+    def save(self) -> User:
+        """Создаёт пользователя с выбранной ролью и статусом активности.
+
+        Контекст использования:
+            Вызывается из view после успешной валидации формы.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Созданный объект ``User``.
+
+        Исключения и особые случаи:
+            Ошибки модели могут возникнуть на уровне ``create_user``.
+
+        Побочные эффекты:
+            Создаёт новую запись пользователя в БД.
+        """
+
+        role = self.cleaned_data["role"]
+        user = User.objects.create_user(
+            email=self.cleaned_data["email"],
+            nickname=self.cleaned_data["nickname"],
+            password=self.cleaned_data["password1"],
+            role=role,
+            is_active=self.cleaned_data["is_active"],
+            is_staff=role in {UserRole.ADMIN, UserRole.SUPERADMIN},
+            is_superuser=role == UserRole.SUPERADMIN,
+        )
+        return user

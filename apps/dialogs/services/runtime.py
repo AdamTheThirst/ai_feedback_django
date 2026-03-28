@@ -7,6 +7,8 @@ from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
+from apps.auditlog.models import AuditLogLevel
+from apps.auditlog.services import log_audit_event
 from apps.content.models import Scenario, ScenarioPrompt
 from apps.dialogs.models import (
     DialogEndedReason,
@@ -15,6 +17,7 @@ from apps.dialogs.models import (
     DialogSession,
     DialogSessionStatus,
 )
+from apps.integrations.services.llm import LLMConfigurationError, call_chat_completion
 from apps.platform_config.models import PlatformSettings
 
 
@@ -37,6 +40,9 @@ class DialogNotActiveError(Exception):
 
 class DuplicateFinishError(Exception):
     """Сигнализирует о параллельной попытке завершения одного диалога."""
+
+
+LLM_DIALOG_ATTEMPTS = 2
 
 
 def get_active_platform_settings() -> PlatformSettings | None:
@@ -103,10 +109,117 @@ def create_dialog_session(user_id: int, scenario: Scenario, scenario_prompt: Sce
     return dialog
 
 
-def build_mock_assistant_reply(user_text: str) -> str:
-    """Генерирует временный ответ ассистента до интеграции внешней LLM."""
+def _build_dialog_transcript(dialog: DialogSession) -> str:
+    """Собирает текущий транскрипт диалога для передачи в LLM.
 
-    return f"Понял вас. Уточню: {user_text[:180]}"
+    Контекст использования:
+        Применяется при генерации игрового ответа, чтобы модель видела историю
+        реплик пользователя и персонажа в рамках одной сессии.
+
+    Параметры:
+        dialog: Текущая диалоговая сессия.
+
+    Возвращаемое значение:
+        Текстовый транскрипт в формате ``Роль: текст``.
+
+    Исключения и особые случаи:
+        При отсутствии сообщений возвращается пустая строка.
+
+    Побочные эффекты:
+        Выполняет чтение связанных сообщений из БД.
+    """
+
+    parts: list[str] = []
+    for message in dialog.messages.order_by("sequence_no"):
+        role = "Пользователь" if message.role == DialogMessageRole.USER else "Персонаж"
+        parts.append(f"{role}: {message.text}")
+    return "\n".join(parts)
+
+
+def build_game_llm_messages(dialog: DialogSession, user_text: str) -> list[dict[str, str]]:
+    """Формирует список messages для OpenAI-compatible chat completion.
+
+    Контекст использования:
+        Используется в runtime-диалоге как единая сборка мастер-контекста:
+        игровой промт, условия сценария, стартовое сообщение и транскрипт.
+
+    Параметры:
+        dialog: Текущая диалоговая сессия.
+        user_text: Последняя реплика пользователя.
+
+    Возвращаемое значение:
+        Список словарей ``messages`` для chat completion.
+
+    Исключения и особые случаи:
+        Особые исключения отсутствуют.
+
+    Побочные эффекты:
+        Читает связанный ``scenario_prompt_used`` и историю сообщений.
+    """
+
+    scenario_prompt_text = dialog.scenario_prompt_used.prompt_text
+    transcript = _build_dialog_transcript(dialog)
+    system_text = (
+        "Ты ведёшь ролевой диалог в тренажёре обратной связи.\n"
+        f"Игровой промт:\n{scenario_prompt_text}\n\n"
+        f"Условия сценария:\n{dialog.conditions_snapshot_text}\n\n"
+        f"Стартовая реплика персонажа:\n{dialog.opening_message_snapshot_text}\n\n"
+        f"Транскрипт диалога:\n{transcript}\n\n"
+        "Отвечай на русском языке. Не выходи из роли."
+    )
+    return [
+        {"role": "system", "content": system_text},
+        {"role": "user", "content": user_text},
+    ]
+
+
+def generate_assistant_reply(dialog: DialogSession, user_text: str, settings: PlatformSettings | None) -> str:
+    """Генерирует ответ персонажа через внешний LLM с одним retry.
+
+    Контекст использования:
+        Вызывается из ``send_user_message`` вместо mock-заглушки и реализует
+        требование: повторить LLM-вызов 1 раз, затем вернуть дружелюбную ошибку.
+
+    Параметры:
+        dialog: Активный диалог для контекста промта и транскрипта.
+        user_text: Последняя реплика пользователя.
+        settings: Активные глобальные платформенные настройки.
+
+    Возвращаемое значение:
+        Текст ответа ассистента или контролируемая ошибка для пользователя.
+
+    Исключения и особые случаи:
+        Внутренние исключения LLM-клиента перехватываются и логируются в аудит.
+
+    Побочные эффекты:
+        Выполняет сетевые LLM-запросы и пишет технические события в аудит-лог.
+    """
+
+    messages = build_game_llm_messages(dialog=dialog, user_text=user_text)
+    last_error: Exception | None = None
+    for attempt in range(1, LLM_DIALOG_ATTEMPTS + 1):
+        try:
+            reply = call_chat_completion(messages=messages, settings=settings, for_analysis=False)
+            if reply:
+                return reply[: dialog.effective_game_reply_max_chars]
+            raise ValueError("LLM вернула пустой ответ в игровом диалоге.")
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            log_audit_event(
+                level=AuditLogLevel.WARNING,
+                event_type="dialog.llm_error",
+                message="Ошибка LLM-вызова при генерации игрового ответа.",
+                actor_user_id=dialog.user_id,
+                dialog=dialog,
+                context_json={"attempt": attempt},
+                exception=exc,
+            )
+            if isinstance(exc, LLMConfigurationError):
+                break
+
+    if last_error is not None:
+        return "Извините, не удалось получить ответ от модели. Попробуйте отправить сообщение ещё раз."
+    return "Извините, временно недоступно. Попробуйте ещё раз."
 
 
 def _duplicate_lock_key(dialog_public_id: str, action: str) -> str:
@@ -147,7 +260,8 @@ def send_user_message(dialog: DialogSession, text: str) -> SendMessageResult:
                 char_count=len(text),
             )
 
-            assistant_text = build_mock_assistant_reply(text)
+            settings = get_active_platform_settings()
+            assistant_text = generate_assistant_reply(dialog=locked_dialog, user_text=text, settings=settings)
             assistant_message = DialogMessage.objects.create(
                 dialog=locked_dialog,
                 sequence_no=last_sequence_no + 2,

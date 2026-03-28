@@ -18,6 +18,7 @@ from apps.adminpanel.forms import (
     ScenarioMediaAssetForm,
     ScenarioPromptForm,
     SystemPromptForm,
+    UserCreateForm,
 )
 from apps.adminpanel.services import (
     build_backoffice_stats,
@@ -26,6 +27,7 @@ from apps.adminpanel.services import (
     user_can_manage_object,
 )
 from apps.analysis.models import AnalysisRun
+from apps.accounts.models import User
 from apps.auditlog.models import AuditLogEntry
 from apps.content.models import (
     AnalysisPrompt,
@@ -101,6 +103,48 @@ class BackofficeAccessMixin(LoginRequiredMixin, UserPassesTestMixin):
         if self.request.user.is_authenticated:
             return HttpResponseForbidden("Недостаточно прав для доступа к админ-панели.")
         return super().handle_no_permission()
+
+
+class SuperadminOnlyMixin(BackofficeAccessMixin):
+    """Разрешает доступ к view только пользователю роли superadmin.
+
+    Контекст использования:
+        Нужен для раздела управления пользователями и других операций,
+        которые по бизнес-правилам доступны только супер-администратору.
+
+    Параметры:
+        Используется как mixin в class-based views.
+
+    Возвращаемое значение:
+        ``True`` только для аутентифицированного superadmin.
+
+    Исключения и особые случаи:
+        При недостатке прав возвращает ``403`` через базовый mixin.
+
+    Побочные эффекты:
+        Побочные эффекты отсутствуют.
+    """
+
+    def test_func(self) -> bool:
+        """Проверяет, что пользователь имеет роль superadmin.
+
+        Контекст использования:
+            Вызывается перед доступом к чувствительным административным view.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            ``True`` для superadmin, иначе ``False``.
+
+        Исключения и особые случаи:
+            Особые исключения отсутствуют.
+
+        Побочные эффекты:
+            Побочные эффекты отсутствуют.
+        """
+
+        return bool(self.request.user.is_authenticated and self.request.user.role == "superadmin")
 
 
 class BackofficeBaseListView(BackofficeAccessMixin, ListView):
@@ -355,19 +399,186 @@ class DashboardView(BackofficeAccessMixin, View):
             Выполняет несколько ``COUNT``-запросов к БД.
         """
 
-        stats = build_backoffice_stats(
-            {
-                "games": Game,
-                "scenarios": Scenario,
-                "analysis_prompts": AnalysisPrompt,
-                "system_prompts": SystemPrompt,
-                "media_assets": ScenarioMediaAsset,
-                "dialogs": DialogSession,
-                "analysis_runs": AnalysisRun,
-                "audit_entries": AuditLogEntry,
-            }
-        )
+        stats_map: dict[str, type] = {
+            "games": Game,
+            "scenarios": Scenario,
+            "analysis_prompts": AnalysisPrompt,
+            "system_prompts": SystemPrompt,
+            "media_assets": ScenarioMediaAsset,
+            "dialogs": DialogSession,
+            "analysis_runs": AnalysisRun,
+            "audit_entries": AuditLogEntry,
+        }
+        if request.user.role == "superadmin":
+            stats_map["users"] = User
+        stats = build_backoffice_stats(stats_map)
         return render(request, "adminpanel/dashboard.html", {"stats": stats})
+
+
+class UserListView(SuperadminOnlyMixin, ListView):
+    """Список пользователей для управления супер-администратором.
+
+    Контекст использования:
+        Отдельный раздел бэкофиса, где супер-админ видит все учётные записи
+        и может контролировать статус доступа пользователей.
+
+    Параметры:
+        Использует стандартные параметры ``ListView`` Django.
+
+    Возвращаемое значение:
+        HTML-страница с таблицей/списком пользователей.
+
+    Исключения и особые случаи:
+        Для ролей ниже ``superadmin`` доступ блокируется.
+
+    Побочные эффекты:
+        Побочные эффекты отсутствуют.
+    """
+
+    template_name = "adminpanel/user_list.html"
+    context_object_name = "users"
+
+    def get_queryset(self) -> QuerySet:
+        """Возвращает полный список пользователей по убыванию ID.
+
+        Контекст использования:
+            Нужен для отображения последних созданных/обновлённых пользователей
+            в разделе управления доступами.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            ``QuerySet`` модели ``User``.
+
+        Исключения и особые случаи:
+            Исключения не ожидаются.
+
+        Побочные эффекты:
+            Побочные эффекты отсутствуют.
+        """
+
+        return User.objects.order_by("-id")
+
+
+class UserCreateView(SuperadminOnlyMixin, View):
+    """Создаёт пользователя через форму супер-администратора.
+
+    Контекст использования:
+        Используется для ручного заведения новых пользователей в системе
+        через внутренний бэкофис.
+
+    Параметры:
+        Принимает стандартные параметры ``View`` и данные формы POST.
+
+    Возвращаемое значение:
+        Страница формы или redirect на список пользователей после создания.
+
+    Исключения и особые случаи:
+        Ошибки валидации возвращаются пользователю на форме.
+
+    Побочные эффекты:
+        Создаёт нового пользователя в базе данных.
+    """
+
+    template_name = "adminpanel/user_form.html"
+
+    def get(self, request: HttpRequest) -> HttpResponse:
+        """Показывает форму создания пользователя.
+
+        Контекст использования:
+            Используется при открытии страницы «Создать пользователя».
+
+        Параметры:
+            request: HTTP-запрос супер-администратора.
+
+        Возвращаемое значение:
+            HTML-страница формы.
+
+        Исключения и особые случаи:
+            Исключения не ожидаются.
+
+        Побочные эффекты:
+            Побочные эффекты отсутствуют.
+        """
+
+        return render(request, self.template_name, {"form": UserCreateForm()})
+
+    def post(self, request: HttpRequest) -> HttpResponse:
+        """Создаёт пользователя при валидной форме.
+
+        Контекст использования:
+            Обрабатывает submit формы заведения новой учётной записи.
+
+        Параметры:
+            request: HTTP-запрос супер-администратора.
+
+        Возвращаемое значение:
+            Redirect на список пользователей или страница формы с ошибками.
+
+        Исключения и особые случаи:
+            Ошибки валидации остаются на уровне формы.
+
+        Побочные эффекты:
+            Создаёт запись ``User`` в БД.
+        """
+
+        form = UserCreateForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Пользователь создан.")
+            return redirect("adminpanel:user_list")
+        return render(request, self.template_name, {"form": form})
+
+
+class UserToggleActiveView(SuperadminOnlyMixin, View):
+    """Переключает активность пользователя (исключить/вернуть).
+
+    Контекст использования:
+        Реализует мягкое исключение из системы через ``is_active=False``
+        и обратное восстановление без удаления исторических данных.
+
+    Параметры:
+        Принимает ``pk`` пользователя и HTTP POST-запрос супер-админа.
+
+    Возвращаемое значение:
+        Redirect на список пользователей.
+
+    Исключения и особые случаи:
+        Главный супер-администратор не может отключить сам себя.
+
+    Побочные эффекты:
+        Обновляет флаг активности пользователя в БД.
+    """
+
+    def post(self, request: HttpRequest, pk: int) -> HttpResponse:
+        """Меняет флаг ``is_active`` выбранной учётной записи.
+
+        Контекст использования:
+            Реализует «исключение» пользователя без жёсткого удаления данных.
+
+        Параметры:
+            request: HTTP-запрос супер-администратора.
+            pk: ID целевого пользователя.
+
+        Возвращаемое значение:
+            Redirect на список пользователей.
+
+        Исключения и особые случаи:
+            Нельзя отключить самого главного супер-админа.
+
+        Побочные эффекты:
+            Обновляет поле ``is_active`` в БД.
+        """
+
+        target_user = get_object_or_404(User, pk=pk)
+        if target_user == request.user and target_user.is_primary_superadmin:
+            messages.error(request, "Нельзя отключить главного супер-админа.")
+            return redirect("adminpanel:user_list")
+        target_user.is_active = not target_user.is_active
+        target_user.save(update_fields=["is_active"])
+        messages.success(request, "Статус пользователя обновлён.")
+        return redirect("adminpanel:user_list")
 
 
 class GameListView(BackofficeBaseListView):

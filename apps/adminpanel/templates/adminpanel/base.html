@@ -14,6 +14,9 @@
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:analysis_prompt_list' %}">Аналитические промты</a>
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:system_prompt_list' %}">Системные промты</a>
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:media_list' %}">Медиа</a>
+    {% if request.user.role == 'superadmin' %}
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:user_list' %}">Пользователи</a>
+    {% endif %}
 </nav>
 
 {% block backoffice_content %}{% endblock %}

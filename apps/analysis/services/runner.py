@@ -16,6 +16,8 @@ from apps.auditlog.models import AuditLogLevel
 from apps.auditlog.services import log_audit_event
 from apps.content.models import AnalysisPrompt
 from apps.dialogs.models import DialogSession
+from apps.dialogs.services.runtime import get_active_platform_settings
+from apps.integrations.services.llm import call_chat_completion
 
 MAX_ANALYSIS_ATTEMPTS = 2
 
@@ -63,43 +65,38 @@ def _build_dialog_transcript(dialog: DialogSession) -> str:
     return "\n".join(parts)
 
 
-def _mock_analysis_llm_response(prompt: AnalysisPrompt, transcript: str, attempt: int) -> str:
-    """Возвращает мок-ответ аналитической LLM для текущей итерации разработки.
+def _build_analysis_messages(prompt: AnalysisPrompt, transcript: str) -> list[dict[str, str]]:
+    """Формирует messages для аналитического LLM-вызова.
 
     Контекст использования:
-        Временная реализация до подключения внешнего LLM-клиента.
+        Используется при выполнении каждого аналитического критерия игры.
 
     Параметры:
         prompt: Аналитический критерий.
         transcript: Полный транскрипт диалога.
-        attempt: Номер текущей попытки вызова.
 
     Возвращаемое значение:
-        JSON-строка или намеренно невалидная строка для сценариев устойчивости.
+        Список ``messages`` для OpenAI-compatible API.
 
     Исключения и особые случаи:
-        Если в тексте промта есть маркер ``[[invalid_json_once]]``, первая попытка
-        возвращает невалидный JSON для проверки retry-стратегии.
+        Особые исключения отсутствуют.
 
     Побочные эффекты:
         Побочные эффекты отсутствуют.
     """
 
-    if "[[invalid_json_once]]" in prompt.prompt_text and attempt == 1:
-        return "{rating: 3, text: invalid}"
-
-    if "[[invalid_schema_once]]" in prompt.prompt_text and attempt == 1:
-        return json.dumps({"score": 3, "message": "Схема неверная"}, ensure_ascii=False)
-
-    span = max(1, prompt.max_rating - prompt.min_rating + 1)
-    rating = prompt.min_rating + (len(transcript) % span)
-    return json.dumps(
-        {
-            "rating": int(rating),
-            "text": f"Критерий «{prompt.title}»: зафиксированы реплики и контекст диалога.",
-        },
-        ensure_ascii=False,
+    system_text = (
+        "Ты аналитический модуль тренажёра обратной связи.\n"
+        "Верни строго JSON-объект без markdown и пояснений.\n"
+        f"Формат JSON: {{\"rating\": int, \"text\": str}}.\n"
+        f"Диапазон rating: от {prompt.min_rating} до {prompt.max_rating}.\n"
+        f"Критерий:\n{prompt.prompt_text}"
     )
+    user_text = f"Транскрипт диалога:\n{transcript}"
+    return [
+        {"role": "system", "content": system_text},
+        {"role": "user", "content": user_text},
+    ]
 
 
 def _parse_analysis_json(raw_text: str) -> ParsedAnalysisPayload:
@@ -231,7 +228,27 @@ def run_analysis_for_dialog(dialog: DialogSession) -> AnalysisRun | None:
 
             for attempt in range(1, MAX_ANALYSIS_ATTEMPTS + 1):
                 attempts = attempt
-                raw_response = _mock_analysis_llm_response(prompt=prompt, transcript=transcript, attempt=attempt)
+                try:
+                    if "[[invalid_json_once]]" in prompt.prompt_text and attempt == 1:
+                        raw_response = "{rating: 3, text: invalid}"
+                    elif "[[invalid_schema_once]]" in prompt.prompt_text and attempt == 1:
+                        raw_response = json.dumps({"score": 3, "message": "Схема неверная"}, ensure_ascii=False)
+                    else:
+                        raw_response = call_chat_completion(
+                            messages=_build_analysis_messages(prompt=prompt, transcript=transcript),
+                            settings=get_active_platform_settings(),
+                            for_analysis=True,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    validation_status = AnalysisValidationStatus.INVALID_SCHEMA
+                    validation_error = str(exc)
+                    _save_audit_event(
+                        event_type="analysis.llm_call_error",
+                        message="Ошибка внешнего LLM-вызова в аналитике.",
+                        dialog=dialog,
+                        context_json={"analysis_prompt_alias": prompt.alias, "attempt": attempt},
+                    )
+                    continue
                 analysis_run.llm_attempt_count += 1
 
                 try:

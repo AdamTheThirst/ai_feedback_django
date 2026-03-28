@@ -193,3 +193,93 @@ class BackofficeContentPermissionsTests(TestCase):
             reverse("adminpanel:game_update", kwargs={"pk": self.game_admin_2.pk})
         )
         self.assertEqual(response.status_code, 200)
+
+    def test_superadmin_can_access_user_management(self) -> None:
+        """Проверяет доступ супер-админа к разделу пользователей в бэкофисе.
+
+        Контекст использования:
+            Подтверждает требование управления пользователями только для
+            роли супер-администратора.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; проверяет успешный HTTP-ответ.
+
+        Исключения и особые случаи:
+            Исключения не ожидаются.
+
+        Побочные эффекты:
+            Побочные эффекты отсутствуют.
+        """
+
+        self.client.force_login(self.superadmin)
+        response = self.client.get(reverse("adminpanel:user_list"))
+        self.assertEqual(response.status_code, 200)
+
+    def test_admin_cannot_access_user_management(self) -> None:
+        """Проверяет запрет доступа обычному администратору к списку пользователей.
+
+        Контекст использования:
+            Закрывает security-ограничение раздела управления пользователями.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; проверяет ответ ``403``.
+
+        Исключения и особые случаи:
+            Исключения не ожидаются.
+
+        Побочные эффекты:
+            Побочные эффекты отсутствуют.
+        """
+
+        self.client.force_login(self.admin_1)
+        response = self.client.get(reverse("adminpanel:user_list"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_superadmin_can_create_and_toggle_user(self) -> None:
+        """Проверяет создание и исключение пользователя супер-администратором.
+
+        Контекст использования:
+            Закрывает бизнес-требование управления пользовательскими записями
+            из внутренней административной панели.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; проверяет изменение состояния БД.
+
+        Исключения и особые случаи:
+            Исключения не ожидаются.
+
+        Побочные эффекты:
+            Создаёт пользователя и меняет его ``is_active``.
+        """
+
+        self.client.force_login(self.superadmin)
+        create_response = self.client.post(
+            reverse("adminpanel:user_create"),
+            data={
+                "email": "new.by.super@example.com",
+                "nickname": "Новый",
+                "role": UserRole.USER,
+                "is_active": "on",
+                "password1": "StrongPassword123",
+                "password2": "StrongPassword123",
+            },
+        )
+        self.assertEqual(create_response.status_code, 302)
+        created_user = User.objects.get(email="new.by.super@example.com")
+        self.assertTrue(created_user.is_active)
+
+        toggle_response = self.client.post(
+            reverse("adminpanel:user_toggle_active", kwargs={"pk": created_user.pk})
+        )
+        self.assertEqual(toggle_response.status_code, 302)
+        created_user.refresh_from_db()
+        self.assertFalse(created_user.is_active)

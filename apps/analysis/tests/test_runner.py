@@ -1,5 +1,7 @@
 """Тесты синхронного анализа и устойчивости к невалидному JSON."""
 
+from unittest.mock import patch
+
 from django.test import TestCase
 
 from apps.analysis.models import AnalysisValidationStatus
@@ -210,3 +212,48 @@ class AnalysisRunnerTests(TestCase):
 
         analysis_run = run_analysis_for_dialog(dialog)
         self.assertIsNone(analysis_run)
+
+    @patch("apps.analysis.services.runner.call_chat_completion")
+    @patch("apps.analysis.services.runner.get_active_platform_settings")
+    def test_analysis_uses_llm_and_parses_json(self, settings_mock, llm_mock) -> None:
+        """Проверяет реальный путь анализа через LLM-вызов и JSON-парсинг.
+
+        Контекст использования:
+            Фиксирует, что аналитика больше не использует только mock-ответы,
+            а читает строку из LLM и валидирует её контракт.
+
+        Параметры:
+            settings_mock: Мок платформенных настроек.
+            llm_mock: Мок LLM-вызова.
+
+        Возвращаемое значение:
+            Ничего не возвращает; проверяет сохранённый ``AnalysisResult``.
+
+        Исключения и особые случаи:
+            При ошибке парсинга/сохранения тест завершится неуспешно.
+
+        Побочные эффекты:
+            Создаёт ``AnalysisRun`` и ``AnalysisResult`` в тестовой БД.
+        """
+
+        settings_mock.return_value = None
+        llm_mock.return_value = '{"rating": 3, "text": "Хорошая структура ответа."}'
+
+        dialog = self._create_finished_dialog_with_user_message()
+        AnalysisPrompt.objects.create(
+            game=self.game,
+            alias="llm-json",
+            title="LLM JSON",
+            header_text="LLM JSON",
+            prompt_text="Верни JSON",
+            sort_order=1,
+            min_rating=0,
+            max_rating=5,
+            is_active=True,
+            created_by=self.user,
+        )
+
+        analysis_run = run_analysis_for_dialog(dialog)
+        result = analysis_run.results.get()
+        self.assertEqual(result.validation_status, AnalysisValidationStatus.VALID)
+        self.assertEqual(result.rating, 3)

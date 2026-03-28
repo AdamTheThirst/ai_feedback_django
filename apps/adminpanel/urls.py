@@ -28,6 +28,9 @@ from apps.adminpanel.views import (
     SystemPromptCreateView,
     SystemPromptListView,
     SystemPromptUpdateView,
+    UserCreateView,
+    UserListView,
+    UserToggleActiveView,
 )
 
 app_name = "adminpanel"
@@ -58,4 +61,7 @@ urlpatterns = [
     path("media/create/", MediaCreateView.as_view(), name="media_create"),
     path("media/<int:pk>/edit/", MediaUpdateView.as_view(), name="media_update"),
     path("media/<int:pk>/archive/", MediaArchiveView.as_view(), name="media_archive"),
+    path("users/", UserListView.as_view(), name="user_list"),
+    path("users/create/", UserCreateView.as_view(), name="user_create"),
+    path("users/<int:pk>/toggle-active/", UserToggleActiveView.as_view(), name="user_toggle_active"),
 ]

@@ -10,7 +10,7 @@
 </head>
 <body class="bg-light">
 <main class="container py-4 app-container">
-    {% if messages %}
+    {% if messages and request.user.is_authenticated and request.user.role == 'superadmin' %}
         <div class="mb-3">
             {% for message in messages %}
                 <div class="alert alert-{{ message.tags|default:'info' }}" role="alert">{{ message }}</div>
