@@ -2,7 +2,37 @@
 
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+
+def _load_environment_variables() -> None:
+    """Загружает переменные окружения из локального файла ``.env``.
+
+    Контекст использования:
+        Вызывается на старте Django-настроек, чтобы локальная разработка могла
+        передавать секреты и параметры интеграций через файл ``.env`` без
+        хардкода в репозитории.
+
+    Параметры:
+        Параметры отсутствуют.
+
+    Возвращаемое значение:
+        Ничего не возвращает.
+
+    Исключения и особые случаи:
+        Если файла ``.env`` нет, загрузчик не выбрасывает исключение и
+        продолжает работу со стандартным окружением процесса.
+
+    Побочные эффекты:
+        Обновляет ``os.environ`` значениями из ``BASE_DIR / ".env"``.
+    """
+
+    load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
+
+
+_load_environment_variables()
 
 SECRET_KEY = "dev-only-placeholder-secret-key-change-me"
 

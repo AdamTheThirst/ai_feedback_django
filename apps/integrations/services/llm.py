@@ -31,6 +31,37 @@ class LLMConfigurationError(Exception):
     """
 
 
+def _env_value_with_aliases(primary_name: str, *alias_names: str) -> str:
+    """Возвращает первую непустую переменную окружения из списка имён.
+
+    Контекст использования:
+        Нужен для плавной поддержки разных схем именования env-переменных
+        (``LLM_*`` и совместимые ``OPENAI_*``) без дублирования логики в
+        конфигураторе запроса.
+
+    Параметры:
+        primary_name: Основное имя переменной окружения.
+        *alias_names: Дополнительные совместимые имена в порядке приоритета.
+
+    Возвращаемое значение:
+        Строка со значением первой найденной непустой переменной или пустая
+        строка, если значения не задано.
+
+    Исключения и особые случаи:
+        Исключения не выбрасываются; отсутствующие переменные считаются
+        нормальным сценарием.
+
+    Побочные эффекты:
+        Читает значения из ``os.environ``.
+    """
+
+    for env_name in (primary_name, *alias_names):
+        value = os.getenv(env_name, "").strip()
+        if value:
+            return value
+    return ""
+
+
 @dataclass(slots=True)
 class LLMRequestConfig:
     """Конфигурация одного LLM-вызова для диалога или аналитики.
@@ -86,12 +117,15 @@ def _build_request_config(settings: PlatformSettings | None, *, for_analysis: bo
         Читает переменные окружения процесса.
     """
 
-    base_url = (os.getenv("LLM_BASE_URL") or (settings.llm_base_url if settings else "")).strip()
-    api_key = (os.getenv("LLM_API_KEY") or (settings.llm_api_key if settings else "")).strip()
-    model_name = (os.getenv("LLM_MODEL_NAME") or (settings.llm_model_name if settings else "Qwen/Qwen3-32B")).strip()
+    base_url = (_env_value_with_aliases("LLM_BASE_URL", "OPENAI_BASE_URL") or (settings.llm_base_url if settings else "")).strip()
+    api_key = (_env_value_with_aliases("LLM_API_KEY", "OPENAI_API_KEY") or (settings.llm_api_key if settings else "")).strip()
+    model_name = (
+        _env_value_with_aliases("LLM_MODEL_NAME", "OPENAI_MODEL")
+        or (settings.llm_model_name if settings else "Qwen/Qwen3-32B")
+    ).strip()
 
     if not base_url:
-        raise LLMConfigurationError("Не настроен LLM_BASE_URL (env или PlatformSettings).")
+        raise LLMConfigurationError("Не настроен LLM_BASE_URL/OPENAI_BASE_URL (env или PlatformSettings).")
 
     temperature = float(settings.llm_temperature) if settings else 0.7
     top_p = float(settings.llm_top_p) if settings else 0.8
