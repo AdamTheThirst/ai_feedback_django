@@ -15,7 +15,10 @@
                     <div class="text-danger small">{{ field.errors }}</div>
                 </div>
             {% endfor %}
-            <button type="submit" class="btn btn-primary">Создать</button>
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary">Создать</button>
+                <a href="{% url 'adminpanel:dashboard' %}" class="btn btn-outline-secondary">Отмена</a>
+            </div>
         </form>
     </div>
 </div>

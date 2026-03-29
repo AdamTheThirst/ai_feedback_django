@@ -60,6 +60,13 @@
             <div id="pending-indicator" class="chat-typing-indicator d-none" role="status">Думаю...</div>
         </section>
 
+        <div id="analysis-overlay" class="chat-analysis-overlay d-none" aria-live="polite">
+            <div class="chat-analysis-card">
+                <div class="spinner-border text-secondary mb-3" role="status" aria-hidden="true"></div>
+                <div>Идёт анализ диалога, это может занять некоторое время. Пожалуйста, подождите.</div>
+            </div>
+        </div>
+
         {% if can_send_message %}
             <form id="send-form" class="chat-composer">
                 {% csrf_token %}
@@ -87,6 +94,7 @@
     const messagesContainer = document.getElementById('chat-messages');
     const pendingIndicator = document.getElementById('pending-indicator');
     const timerValueNode = document.getElementById('timer-value');
+    const analysisOverlay = document.getElementById('analysis-overlay');
 
     const sendUrl = "{{ send_url }}";
     const finishUrl = "{{ finish_url }}";
@@ -188,6 +196,9 @@
         dialogActive = false;
         pendingIndicator.classList.remove('d-none');
         pendingIndicator.textContent = 'Завершаю диалог...';
+        if (reason === 'manual_feedback' && analysisOverlay) {
+            analysisOverlay.classList.remove('d-none');
+        }
 
         if (textarea) {
             textarea.disabled = true;
@@ -212,6 +223,9 @@
             if (!payload.ok) {
                 alert(payload.message || 'Не удалось завершить диалог.');
                 dialogActive = true;
+                if (analysisOverlay) {
+                    analysisOverlay.classList.add('d-none');
+                }
                 return;
             }
 
@@ -226,6 +240,9 @@
         } catch (error) {
             alert('Ошибка сети при завершении диалога.');
             dialogActive = true;
+            if (analysisOverlay) {
+                analysisOverlay.classList.add('d-none');
+            }
         } finally {
             if (reason !== 'timeout') {
                 pendingIndicator.classList.add('d-none');

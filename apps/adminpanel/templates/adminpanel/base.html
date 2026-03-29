@@ -1,23 +1,26 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h4 mb-0">Бэкофис</h1>
-    <div class="text-muted small">Роль: {{ request.user.get_role_display }}</div>
+<div class="adminpanel-scope">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4 mb-0">Бэкофис</h1>
+        <div class="text-muted small">Роль: {{ request.user.get_role_display }}</div>
+    </div>
+
+    <nav class="mb-3 d-flex flex-wrap gap-2">
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'content:game_list' %}">Вернуться в основное меню</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:dashboard' %}">Дашборд</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:game_list' %}">Игры</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:scenario_list' %}">Сценарии</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:scenario_prompt_list' %}">Игровые промты</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:analysis_prompt_list' %}">Аналитические промты</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:system_prompt_list' %}">Системные промты</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:media_list' %}">Медиа</a>
+        {% if request.user.role == 'superadmin' %}
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:user_list' %}">Пользователи</a>
+        {% endif %}
+    </nav>
+
+    {% block backoffice_content %}{% endblock %}
 </div>
-
-<nav class="mb-3 d-flex flex-wrap gap-2">
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:dashboard' %}">Дашборд</a>
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:game_list' %}">Игры</a>
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:scenario_list' %}">Сценарии</a>
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:scenario_prompt_list' %}">Игровые промты</a>
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:analysis_prompt_list' %}">Аналитические промты</a>
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:system_prompt_list' %}">Системные промты</a>
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:media_list' %}">Медиа</a>
-    {% if request.user.role == 'superadmin' %}
-        <a class="btn btn-sm btn-outline-secondary" href="{% url 'adminpanel:user_list' %}">Пользователи</a>
-    {% endif %}
-</nav>
-
-{% block backoffice_content %}{% endblock %}
 {% endblock %}

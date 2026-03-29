@@ -18,7 +18,10 @@
                     {% endif %}
                 </div>
             {% endfor %}
-            <button type="submit" class="btn btn-primary">Сохранить</button>
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary">Сохранить</button>
+                <a href="{% url 'adminpanel:dashboard' %}" class="btn btn-outline-secondary">Отмена</a>
+            </div>
         </form>
     </div>
 </div>

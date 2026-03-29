@@ -218,6 +218,54 @@ class BackofficeContentPermissionsTests(TestCase):
         response = self.client.get(reverse("adminpanel:user_list"))
         self.assertEqual(response.status_code, 200)
 
+    def test_backoffice_navigation_contains_main_menu_link(self) -> None:
+        """Проверяет наличие кнопки возврата в основное пользовательское меню.
+
+        Контекст использования:
+            Фиксирует новый элемент навигации бэкофиса, который должен
+            позволять быстрый переход из админки в пользовательский контур.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; проверяет HTML-ответ дашборда.
+
+        Исключения и особые случаи:
+            Исключения не ожидаются.
+
+        Побочные эффекты:
+            Побочные эффекты отсутствуют.
+        """
+
+        self.client.force_login(self.admin_1)
+        response = self.client.get(reverse("adminpanel:dashboard"))
+        self.assertContains(response, "Вернуться в основное меню")
+
+    def test_object_form_contains_cancel_button(self) -> None:
+        """Проверяет, что в CRUD-форме контента есть кнопка «Отмена».
+
+        Контекст использования:
+            Нужен для подтверждения UX-требования: рядом с кнопкой сохранения
+            пользователь всегда видит явный сценарий отмены.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; проверяет HTML формы редактирования игры.
+
+        Исключения и особые случаи:
+            Исключения не ожидаются.
+
+        Побочные эффекты:
+            Побочные эффекты отсутствуют.
+        """
+
+        self.client.force_login(self.admin_1)
+        response = self.client.get(reverse("adminpanel:game_update", kwargs={"pk": self.game_admin_1.pk}))
+        self.assertContains(response, "Отмена")
+
     def test_admin_cannot_access_user_management(self) -> None:
         """Проверяет запрет доступа обычному администратору к списку пользователей.
 

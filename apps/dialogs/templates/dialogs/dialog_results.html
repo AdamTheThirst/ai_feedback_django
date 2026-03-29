@@ -27,7 +27,7 @@
                 <div class="card-body py-2">
                     <div class="fw-semibold">{{ result.header_snapshot_text }}</div>
                     <div class="small text-muted mb-1">{{ result.rating }} из {{ result.rating_max }}</div>
-                    <div>{{ result.analysis_text }}</div>
+                    <div>{{ result.analysis_text|safe }}</div>
                     {% if result.validation_status != 'valid' %}
                         <div class="small text-warning mt-1">Статус валидации: {{ result.validation_status }}</div>
                     {% endif %}
