@@ -131,6 +131,38 @@ class DialogRuntimeTests(TestCase):
         first_message = dialog.messages.get(sequence_no=1)
         self.assertEqual(first_message.role, DialogMessageRole.ASSISTANT)
 
+    def test_dialog_detail_renders_new_chat_layout_blocks(self) -> None:
+        """Проверяет базовую структуру нового UI игрового чат-экрана.
+
+        Контекст использования:
+            Фиксирует ключевые контейнеры mobile-first композиции: шапка,
+            кнопка завершения, лента сообщений и нижняя зона ввода.
+
+        Параметры:
+            Параметры отсутствуют.
+
+        Возвращаемое значение:
+            Ничего не возвращает; проверяет HTML-ответ страницы диалога.
+
+        Исключения и особые случаи:
+            При отсутствии ожидаемых блоков тест считается проваленным.
+
+        Побочные эффекты:
+            Создаёт активный диалог для рендера шаблона.
+        """
+
+        self.client.force_login(self.user)
+        dialog = self._start_dialog()
+
+        response = self.client.get(reverse("dialogs:dialog_detail", kwargs={"dialog_public_id": dialog.public_id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "class=\"chat-card\"")
+        self.assertContains(response, "id=\"finish-button\"")
+        self.assertContains(response, "class=\"chat-conditions\"")
+        self.assertContains(response, "id=\"chat-messages\"")
+        self.assertContains(response, "class=\"chat-composer\"")
+
     def test_send_message_returns_json_with_user_and_assistant_messages(self) -> None:
         """Проверяет JSON-контракт endpoint-а send-message."""
 

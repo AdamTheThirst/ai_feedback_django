@@ -31,6 +31,35 @@ from apps.exports.services.pdf import PdfExportError, build_dialog_results_pdf
 from apps.auditlog.models import AuditLogLevel
 
 
+def _resolve_character_ui_data(dialog: DialogSession) -> tuple[str, str | None]:
+    """Возвращает имя и фото персонажа для отображения в пузырях ИИ.
+
+    Контекст использования:
+        Применяется экраном игрового чата, где каждое сообщение ассистента
+        должно показывать имя персонажа и его изображение из сценария.
+
+    Параметры:
+        dialog: Активная или завершённая сессия диалога с привязанным сценарием.
+
+    Возвращаемое значение:
+        Кортеж ``(character_name, character_image_url)``.
+        Если медиа не привязано, возвращается безопасный fallback:
+        ``character_name`` из заголовка сценария и ``None`` для изображения.
+
+    Исключения и особые случаи:
+        Отсутствие файла у media_asset считается допустимым случаем и не
+        приводит к исключению.
+
+    Побочные эффекты:
+        Побочные эффекты отсутствуют; выполняется только чтение полей модели.
+    """
+
+    media_asset = dialog.scenario.media_asset
+    character_name = media_asset.title if media_asset and media_asset.title else dialog.scenario.title
+    character_image_url = media_asset.file.url if media_asset and media_asset.file else None
+    return character_name, character_image_url
+
+
 def _dialog_to_payload(dialog: DialogSession) -> dict:
     """Преобразует модель диалога в JSON payload состояния runtime."""
 
@@ -138,11 +167,12 @@ def dialog_detail_view(request: HttpRequest, dialog_public_id: str) -> HttpRespo
     """Отображает страницу чата и текущего runtime-состояния диалога."""
 
     dialog = get_object_or_404(
-        DialogSession.objects.select_related("game", "scenario"),
+        DialogSession.objects.select_related("game", "scenario", "scenario__media_asset"),
         public_id=dialog_public_id,
         user=request.user,
     )
     messages_qs = dialog.messages.order_by("sequence_no")
+    character_name, character_image_url = _resolve_character_ui_data(dialog)
 
     return render(
         request,
@@ -156,6 +186,8 @@ def dialog_detail_view(request: HttpRequest, dialog_public_id: str) -> HttpRespo
             "finish_url": f"/dialogs/{dialog.public_id}/finish/",
             "abandon_url": f"/dialogs/{dialog.public_id}/abandon/",
             "results_url": f"/dialogs/{dialog.public_id}/results/",
+            "character_name": character_name,
+            "character_image_url": character_image_url,
         },
     )
 

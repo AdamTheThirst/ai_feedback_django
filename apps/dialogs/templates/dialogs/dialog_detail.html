@@ -1,49 +1,87 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Диалог{% endblock %}
 
 {% block content %}
-<header class="mb-3">
-    <h1 class="h5 mb-1">{{ dialog.game.title }} / {{ dialog.scenario.title }}</h1>
-    <p class="small text-muted mb-0">Осталось секунд: <span id="timer-value">{{ seconds_remaining }}</span></p>
-</header>
-
-<section class="card mb-3">
-    <div class="card-body py-2">
-        <div class="small text-muted">Условия сценария</div>
-        <div>{{ dialog.conditions_snapshot_text }}</div>
-    </div>
-</section>
-
-<section id="chat-messages" class="d-grid gap-2 mb-3">
-    {% for message in messages %}
-        <article class="card {% if message.role == 'user' %}border-primary{% else %}border-secondary{% endif %}">
-            <div class="card-body py-2">
-                <div class="small text-muted">{{ message.role }}</div>
-                <div>{{ message.text }}</div>
+<div class="chat-shell">
+    <section class="chat-card" aria-label="Игровой чат">
+        <header class="chat-header">
+            <div class="chat-header-row">
+                <img class="chat-logo" src="{% static 'img/logo_mini.svg' %}" alt="Логотип" loading="lazy">
+                <h1 class="chat-title">{{ dialog.game.title }} | {{ dialog.scenario.title }}</h1>
+                <div id="timer-value" class="chat-timer" aria-live="polite">{{ seconds_remaining }}</div>
             </div>
-        </article>
-    {% endfor %}
-</section>
 
-<div id="pending-indicator" class="alert alert-info py-2 d-none" role="status">Думаю...</div>
+            {% if can_send_message %}
+                <button id="finish-button" type="button" class="chat-finish-button">Дай обратную связь</button>
+            {% else %}
+                <a href="{{ results_url }}" class="chat-finish-button chat-finish-button--muted">Перейти к результату</a>
+            {% endif %}
+        </header>
 
-{% if can_send_message %}
-    <form id="send-form" class="d-grid gap-2 mb-3">
-        {% csrf_token %}
-        <textarea id="message-text" class="form-control" rows="3" placeholder="Введите сообщение"></textarea>
-        <button type="submit" class="btn btn-primary">Отправить</button>
-    </form>
-    <button id="finish-button" type="button" class="btn btn-outline-danger w-100">Дай обратную связь</button>
-{% else %}
-    <div class="alert alert-secondary">Диалог завершён. Отправка сообщений недоступна.</div>
-    <a href="{{ results_url }}" class="btn btn-primary w-100">Перейти к результату</a>
-{% endif %}
+        <section id="chat-messages" class="chat-messages" aria-live="polite" aria-label="История диалога">
+            <article class="chat-conditions">
+                {{ dialog.conditions_snapshot_text|linebreaksbr }}
+            </article>
+
+            {% for message in messages %}
+                <article class="chat-message {% if message.role == 'user' %}chat-message--user{% else %}chat-message--assistant{% endif %}">
+                    {% if message.role != 'user' %}
+                        <div class="chat-message-avatar chat-message-avatar--assistant">
+                            {% if character_image_url %}
+                                <img src="{{ character_image_url }}" alt="{{ character_name }}" loading="lazy">
+                            {% else %}
+                                <span>{{ character_name|slice:":1"|upper }}</span>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+
+                    <div class="chat-message-content">
+                        <div class="chat-message-meta">
+                            {% if message.role == 'user' %}
+                                {{ request.user.nickname }}
+                            {% else %}
+                                {{ character_name }}
+                            {% endif %}
+                        </div>
+                        <div class="chat-message-bubble {% if message.role == 'user' %}chat-message-bubble--user{% else %}chat-message-bubble--assistant{% endif %}">{{ message.text|linebreaksbr }}</div>
+                    </div>
+
+                    {% if message.role == 'user' %}
+                        <div class="chat-message-avatar chat-message-avatar--user" aria-hidden="true">
+                            {{ request.user.nickname|slice:":1"|upper }}
+                        </div>
+                    {% endif %}
+                </article>
+            {% endfor %}
+
+            <div id="pending-indicator" class="chat-typing-indicator d-none" role="status">Думаю...</div>
+        </section>
+
+        {% if can_send_message %}
+            <form id="send-form" class="chat-composer">
+                {% csrf_token %}
+                <textarea
+                    id="message-text"
+                    class="chat-composer-textarea"
+                    rows="4"
+                    maxlength="{{ dialog.effective_user_message_max_chars }}"
+                    placeholder="Введите сообщение"
+                ></textarea>
+                <button type="submit" id="send-button" class="chat-composer-submit">Отправить</button>
+            </form>
+        {% else %}
+            <div class="chat-composer chat-composer--readonly">Диалог завершён. Отправка сообщений недоступна.</div>
+        {% endif %}
+    </section>
+</div>
 
 <script>
 (function () {
     const form = document.getElementById('send-form');
     const finishButton = document.getElementById('finish-button');
+    const sendButton = document.getElementById('send-button');
     const textarea = document.getElementById('message-text');
     const messagesContainer = document.getElementById('chat-messages');
     const pendingIndicator = document.getElementById('pending-indicator');
@@ -56,15 +94,86 @@
     const csrfTokenInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
     const csrfToken = csrfTokenInput ? csrfTokenInput.value : '';
 
+    const userNickname = "{{ request.user.nickname|escapejs }}";
+    const userAvatarLetter = "{{ request.user.nickname|slice:':1'|upper|escapejs }}";
+    const characterName = "{{ character_name|escapejs }}";
+    const characterImageUrl = "{{ character_image_url|default:''|escapejs }}";
+
     let dialogActive = {{ can_send_message|yesno:"true,false" }};
     let secondsRemaining = Number(timerValueNode.textContent || 0);
 
+    function secondsToTimer(seconds) {
+        const safeSeconds = Math.max(0, Number(seconds) || 0);
+        const minutes = String(Math.floor(safeSeconds / 60)).padStart(2, '0');
+        const restSeconds = String(safeSeconds % 60).padStart(2, '0');
+        return `${minutes}:${restSeconds}`;
+    }
+
+    function isNearBottom() {
+        const threshold = 120;
+        return (messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight) < threshold;
+    }
+
+    function scrollToBottom(force) {
+        if (force || isNearBottom()) {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    }
+
+    function buildAvatarNode(role) {
+        const avatarNode = document.createElement('div');
+        avatarNode.className = `chat-message-avatar ${role === 'user' ? 'chat-message-avatar--user' : 'chat-message-avatar--assistant'}`;
+
+        if (role === 'user') {
+            avatarNode.textContent = userAvatarLetter;
+            return avatarNode;
+        }
+
+        if (characterImageUrl) {
+            const image = document.createElement('img');
+            image.src = characterImageUrl;
+            image.alt = characterName;
+            image.loading = 'lazy';
+            avatarNode.appendChild(image);
+            return avatarNode;
+        }
+
+        const fallbackLetter = document.createElement('span');
+        fallbackLetter.textContent = characterName.slice(0, 1).toUpperCase();
+        avatarNode.appendChild(fallbackLetter);
+        return avatarNode;
+    }
+
     function appendMessage(message) {
-        const card = document.createElement('article');
-        card.className = `card ${message.role === 'user' ? 'border-primary' : 'border-secondary'}`;
-        card.innerHTML = `<div class="card-body py-2"><div class="small text-muted">${message.role}</div><div>${message.text}</div></div>`;
-        messagesContainer.appendChild(card);
-        card.scrollIntoView({behavior: 'smooth', block: 'end'});
+        const shouldStickToBottom = isNearBottom();
+        const article = document.createElement('article');
+        const isUser = message.role === 'user';
+        article.className = `chat-message ${isUser ? 'chat-message--user' : 'chat-message--assistant'}`;
+
+        const contentNode = document.createElement('div');
+        contentNode.className = 'chat-message-content';
+
+        const metaNode = document.createElement('div');
+        metaNode.className = 'chat-message-meta';
+        metaNode.textContent = isUser ? userNickname : characterName;
+
+        const bubbleNode = document.createElement('div');
+        bubbleNode.className = `chat-message-bubble ${isUser ? 'chat-message-bubble--user' : 'chat-message-bubble--assistant'}`;
+        bubbleNode.textContent = message.text;
+
+        contentNode.appendChild(metaNode);
+        contentNode.appendChild(bubbleNode);
+
+        if (isUser) {
+            article.appendChild(contentNode);
+            article.appendChild(buildAvatarNode('user'));
+        } else {
+            article.appendChild(buildAvatarNode('assistant'));
+            article.appendChild(contentNode);
+        }
+
+        messagesContainer.insertBefore(article, pendingIndicator);
+        scrollToBottom(shouldStickToBottom);
     }
 
     async function finishDialog(reason) {
@@ -74,6 +183,16 @@
         dialogActive = false;
         pendingIndicator.classList.remove('d-none');
         pendingIndicator.textContent = 'Завершаю диалог...';
+
+        if (textarea) {
+            textarea.disabled = true;
+        }
+        if (sendButton) {
+            sendButton.disabled = true;
+        }
+        if (finishButton) {
+            finishButton.disabled = true;
+        }
 
         try {
             const response = await fetch(finishUrl, {
@@ -106,6 +225,15 @@
             if (reason !== 'timeout') {
                 pendingIndicator.classList.add('d-none');
             }
+            if (dialogActive && finishButton) {
+                finishButton.disabled = false;
+            }
+            if (dialogActive && textarea) {
+                textarea.disabled = false;
+            }
+            if (dialogActive && sendButton) {
+                sendButton.disabled = false;
+            }
         }
     }
 
@@ -120,8 +248,11 @@
                 return;
             }
 
+            const shouldStickToBottom = isNearBottom();
             pendingIndicator.classList.remove('d-none');
+            pendingIndicator.textContent = 'Думаю...';
             textarea.disabled = true;
+            sendButton.disabled = true;
 
             try {
                 const response = await fetch(sendUrl, {
@@ -143,14 +274,16 @@
 
                 appendMessage(payload.data.user_message);
                 appendMessage(payload.data.assistant_message);
-                timerValueNode.textContent = payload.data.dialog.seconds_remaining;
-                secondsRemaining = payload.data.dialog.seconds_remaining;
+                secondsRemaining = Number(payload.data.dialog.seconds_remaining || secondsRemaining);
+                timerValueNode.textContent = secondsToTimer(secondsRemaining);
                 textarea.value = '';
+                scrollToBottom(shouldStickToBottom);
             } catch (error) {
                 alert('Ошибка сети при отправке сообщения.');
             } finally {
                 pendingIndicator.classList.add('d-none');
                 textarea.disabled = false;
+                sendButton.disabled = false;
                 textarea.focus();
             }
         });
@@ -162,6 +295,9 @@
         });
     }
 
+    timerValueNode.textContent = secondsToTimer(secondsRemaining);
+    scrollToBottom(true);
+
     if (dialogActive) {
         const timerId = setInterval(function () {
             if (!dialogActive) {
@@ -169,7 +305,7 @@
                 return;
             }
             secondsRemaining = Math.max(0, secondsRemaining - 1);
-            timerValueNode.textContent = String(secondsRemaining);
+            timerValueNode.textContent = secondsToTimer(secondsRemaining);
             if (secondsRemaining === 0) {
                 clearInterval(timerId);
                 finishDialog('timeout');
