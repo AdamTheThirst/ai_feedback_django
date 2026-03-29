@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
+{% get_media_prefix as MEDIA_PREFIX %}
 
 {% block title %}Диалог{% endblock %}
 
@@ -8,7 +9,7 @@
     <section class="chat-card" aria-label="Игровой чат">
         <header class="chat-header">
             <div class="chat-header-row">
-                <img class="chat-logo" src="{% static 'img/logo_mini.svg' %}" alt="Логотип" loading="lazy">
+                <img class="chat-logo" src="{{ MEDIA_PREFIX }}ui/logo_mini.png" alt="Логотип" loading="lazy">
                 <h1 class="chat-title">{{ dialog.game.title }} | {{ dialog.scenario.title }}</h1>
                 <div id="timer-value" class="chat-timer" aria-live="polite">{{ seconds_remaining }}</div>
             </div>
@@ -176,6 +177,10 @@
         scrollToBottom(shouldStickToBottom);
     }
 
+    function appendLocalUserMessage(text) {
+        appendMessage({role: 'user', text: text});
+    }
+
     async function finishDialog(reason) {
         if (!dialogActive) {
             return;
@@ -249,6 +254,8 @@
             }
 
             const shouldStickToBottom = isNearBottom();
+            appendLocalUserMessage(text);
+            textarea.value = '';
             pendingIndicator.classList.remove('d-none');
             pendingIndicator.textContent = 'Думаю...';
             textarea.disabled = true;
@@ -272,14 +279,15 @@
                     return;
                 }
 
-                appendMessage(payload.data.user_message);
                 appendMessage(payload.data.assistant_message);
                 secondsRemaining = Number(payload.data.dialog.seconds_remaining || secondsRemaining);
                 timerValueNode.textContent = secondsToTimer(secondsRemaining);
-                textarea.value = '';
                 scrollToBottom(shouldStickToBottom);
             } catch (error) {
-                alert('Ошибка сети при отправке сообщения.');
+                appendMessage({
+                    role: 'assistant',
+                    text: 'Ошибка сети при отправке. Проверьте подключение к серверу и попробуйте снова.',
+                });
             } finally {
                 pendingIndicator.classList.add('d-none');
                 textarea.disabled = false;

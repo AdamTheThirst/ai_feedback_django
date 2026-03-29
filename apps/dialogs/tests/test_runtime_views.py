@@ -162,6 +162,7 @@ class DialogRuntimeTests(TestCase):
         self.assertContains(response, "class=\"chat-conditions\"")
         self.assertContains(response, "id=\"chat-messages\"")
         self.assertContains(response, "class=\"chat-composer\"")
+        self.assertContains(response, "/media/ui/logo_mini.png")
 
     def test_send_message_returns_json_with_user_and_assistant_messages(self) -> None:
         """Проверяет JSON-контракт endpoint-а send-message."""

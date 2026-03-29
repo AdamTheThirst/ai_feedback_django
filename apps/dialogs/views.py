@@ -56,7 +56,12 @@ def _resolve_character_ui_data(dialog: DialogSession) -> tuple[str, str | None]:
 
     media_asset = dialog.scenario.media_asset
     character_name = media_asset.title if media_asset and media_asset.title else dialog.scenario.title
-    character_image_url = media_asset.file.url if media_asset and media_asset.file else None
+    character_image_url: str | None = None
+    if media_asset and media_asset.file:
+        try:
+            character_image_url = media_asset.file.url
+        except ValueError:
+            character_image_url = None
     return character_name, character_image_url
 
 
