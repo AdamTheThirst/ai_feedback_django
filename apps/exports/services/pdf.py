@@ -48,23 +48,32 @@ def _register_pdf_font() -> str:
         Имя зарегистрированного шрифта для использования в стилях ReportLab.
 
     Исключения и особые случаи:
-        Если системный файл шрифта не найден, возвращает ``Helvetica`` как fallback.
+        Если Arial не найден, используется ближайший доступный fallback с
+        кириллицей (например, DejaVuSans), чтобы текст PDF оставался читаемым.
 
     Побочные эффекты:
         Регистрирует шрифт в глобальном реестре ``reportlab.pdfbase.pdfmetrics``.
     """
 
-    font_name = "DejaVuSans"
-    if font_name in pdfmetrics.getRegisteredFontNames():
-        return font_name
-
     candidate_paths = [
+        Path("/usr/share/fonts/truetype/msttcorefonts/Arial.ttf"),
+        Path("/usr/share/fonts/truetype/msttcorefonts/arial.ttf"),
+        Path("/usr/share/fonts/truetype/microsoft/Arial.ttf"),
+        Path("C:/Windows/Fonts/arial.ttf"),
         Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
         Path("/usr/share/fonts/dejavu/DejaVuSans.ttf"),
     ]
+    candidate_names = {
+        "arial.ttf": "Arial",
+        "Arial.ttf": "Arial",
+        "DejaVuSans.ttf": "DejaVuSans",
+    }
+
     for path in candidate_paths:
         if path.exists():
-            pdfmetrics.registerFont(TTFont(font_name, str(path)))
+            font_name = candidate_names.get(path.name, "CustomRuFont")
+            if font_name not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont(font_name, str(path)))
             return font_name
     return "Helvetica"
 
@@ -137,12 +146,6 @@ def build_dialog_results_pdf(view_model: DialogResultsViewModel) -> bytes:
                 flow.append(Spacer(1, 2 * mm))
         else:
             flow.append(Paragraph("Карточки анализа пока недоступны.", base_style))
-
-        flow.append(Spacer(1, 2 * mm))
-        flow.append(Paragraph("Полный транскрипт диалога", section_style))
-        for message in view_model.messages:
-            role_label = "Пользователь" if message.role == "user" else "Персонаж"
-            flow.append(Paragraph(f"{message.sequence_no}. {role_label}: {message.text}".replace("\n", "<br/>"), base_style))
 
         document.build(flow)
         return buffer.getvalue()

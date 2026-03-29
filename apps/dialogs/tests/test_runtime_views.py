@@ -456,8 +456,10 @@ class DialogRuntimeTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Экспорт результатов в PDF")
-        self.assertContains(response, "Транскрипт диалога")
         self.assertContains(response, "Сумма:")
+        self.assertContains(response, "Вернуться к упражнениям")
+        self.assertNotContains(response, "Статус анализа:")
+        self.assertNotContains(response, "Причина завершения:")
 
     def test_export_pdf_returns_attachment_for_owner(self) -> None:
         """Проверяет успешную выдачу PDF-файла владельцу диалога.

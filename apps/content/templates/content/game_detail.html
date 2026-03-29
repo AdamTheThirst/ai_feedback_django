@@ -4,7 +4,7 @@
 
 {% block content %}
 <header class="mb-3">
-    <a href="{% url 'content:game_list' %}" class="btn btn-link px-0">← Назад к играм</a>
+    <a href="{% url 'content:game_list' %}" class="btn btn-outline-secondary btn-sm mb-2">Назад к упражнениям</a>
     <h1 class="h4 mb-1">{{ game.title }}</h1>
     {% if game.short_description %}<p class="text-muted mb-0">{{ game.short_description }}</p>{% endif %}
 </header>
