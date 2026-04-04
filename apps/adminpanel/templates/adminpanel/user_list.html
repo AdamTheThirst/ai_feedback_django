@@ -1,0 +1,33 @@
+{% extends "adminpanel/base.html" %}
+
+{% block title %}Пользователи{% endblock %}
+
+{% block backoffice_content %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h2 class="h5 mb-0">Пользователи ({{ users|length }})</h2>
+    <a class="btn btn-primary btn-sm" href="{% url 'adminpanel:user_create' %}">Создать пользователя</a>
+</div>
+
+<div class="card">
+    <div class="list-group list-group-flush">
+        {% for user_obj in users %}
+            <div class="list-group-item d-flex justify-content-between align-items-start gap-2">
+                <div>
+                    <div class="fw-semibold">{{ user_obj.nickname }} &lt;{{ user_obj.email }}&gt;</div>
+                    <div class="small text-muted">Роль: {{ user_obj.get_role_display }} • Активен: {{ user_obj.is_active|yesno:"да,нет" }}</div>
+                </div>
+                <div>
+                    <form method="post" action="{% url 'adminpanel:user_toggle_active' user_obj.pk %}">
+                        {% csrf_token %}
+                        <button class="btn btn-outline-danger btn-sm" type="submit">
+                            {% if user_obj.is_active %}Исключить{% else %}Вернуть{% endif %}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        {% empty %}
+            <div class="list-group-item text-muted">Пользователей пока нет.</div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

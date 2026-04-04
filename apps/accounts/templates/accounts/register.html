@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Регистрация{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h1 class="h4 mb-3">Регистрация</h1>
+        <form method="post" novalidate>
+            {% csrf_token %}
+            {{ form.non_field_errors }}
+            <div class="mb-3">
+                <label class="form-label" for="id_email">Email</label>
+                {{ form.email }}
+                {{ form.email.errors }}
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="id_nickname">Никнейм</label>
+                {{ form.nickname }}
+                {{ form.nickname.errors }}
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="id_password1">Пароль</label>
+                {{ form.password1 }}
+                {{ form.password1.errors }}
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="id_password2">Подтверждение пароля</label>
+                {{ form.password2 }}
+                {{ form.password2.errors }}
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Зарегистрироваться</button>
+        </form>
+        <p class="mt-3 mb-0 text-center">
+            Уже есть аккаунт? <a href="{% url 'accounts:login' %}">Войти</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

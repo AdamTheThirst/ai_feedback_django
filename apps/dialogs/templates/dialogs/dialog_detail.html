@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+{% load static %}
+{% get_media_prefix as MEDIA_PREFIX %}
+
+{% block title %}Диалог{% endblock %}
+
+{% block content %}
+<div class="chat-shell">
+    <section class="chat-card" aria-label="Игровой чат">
+        <header class="chat-header">
+            <div class="chat-header-row">
+                <img class="chat-logo" src="{{ MEDIA_PREFIX }}ui/logo_mini.png" alt="Логотип" loading="lazy">
+                <h1 class="chat-title">{{ dialog.game.title }} | {{ dialog.scenario.title }}</h1>
+                <div id="timer-value" class="chat-timer" aria-live="polite">{{ seconds_remaining }}</div>
+            </div>
+
+            {% if can_send_message %}
+                <button id="finish-button" type="button" class="chat-finish-button">Дай обратную связь</button>
+            {% else %}
+                <a href="{{ results_url }}" class="chat-finish-button chat-finish-button--muted">Перейти к результату</a>
+            {% endif %}
+        </header>
+
+        <section id="chat-messages" class="chat-messages" aria-live="polite" aria-label="История диалога">
+            <article class="chat-conditions">
+                {{ dialog.conditions_snapshot_text|linebreaksbr }}
+            </article>
+
+            {% for message in messages %}
+                <article class="chat-message {% if message.role == 'user' %}chat-message--user{% else %}chat-message--assistant{% endif %}">
+                    {% if message.role != 'user' %}
+                        <div class="chat-message-avatar chat-message-avatar--assistant">
+                            {% if character_image_url %}
+                                <img src="{{ character_image_url }}" alt="{{ character_name }}" loading="lazy">
+                            {% else %}
+                                <span>{{ character_name|slice:":1"|upper }}</span>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+
+                    <div class="chat-message-content">
+                        <div class="chat-message-meta">
+                            {% if message.role == 'user' %}
+                                {{ request.user.nickname }}
+                            {% else %}
+                                {{ character_name }}
+                            {% endif %}
+                        </div>
+                        <div class="chat-message-bubble {% if message.role == 'user' %}chat-message-bubble--user{% else %}chat-message-bubble--assistant{% endif %}">{{ message.text|linebreaksbr }}</div>
+                    </div>
+
+                    {% if message.role == 'user' %}
+                        <div class="chat-message-avatar chat-message-avatar--user" aria-hidden="true">
+                            {{ request.user.nickname|slice:":1"|upper }}
+                        </div>
+                    {% endif %}
+                </article>
+            {% endfor %}
+
+            <div id="pending-indicator" class="chat-typing-indicator d-none" role="status">Думаю...</div>
+        </section>
+
+        <div id="analysis-overlay" class="chat-analysis-overlay d-none" aria-live="polite">
+            <div class="chat-analysis-card">
+                <div class="spinner-border text-secondary mb-3" role="status" aria-hidden="true"></div>
+                <div>Идёт анализ диалога, это может занять некоторое время. Пожалуйста, подождите.</div>
+            </div>
+        </div>
+
+        {% if can_send_message %}
+            <form id="send-form" class="chat-composer">
+                {% csrf_token %}
+                <textarea
+                    id="message-text"
+                    class="chat-composer-textarea"
+                    rows="4"
+                    maxlength="{{ dialog.effective_user_message_max_chars }}"
+                    placeholder="Введите сообщение"
+                ></textarea>
+                <button type="submit" id="send-button" class="chat-composer-submit">Отправить</button>
+            </form>
+        {% else %}
+            <div class="chat-composer chat-composer--readonly">Диалог завершён. Отправка сообщений недоступна.</div>
+        {% endif %}
+    </section>
+</div>
+
+<script>
+(function () {
+    const form = document.getElementById('send-form');
+    const finishButton = document.getElementById('finish-button');
+    const sendButton = document.getElementById('send-button');
+    const textarea = document.getElementById('message-text');
+    const messagesContainer = document.getElementById('chat-messages');
+    const pendingIndicator = document.getElementById('pending-indicator');
+    const timerValueNode = document.getElementById('timer-value');
+    const analysisOverlay = document.getElementById('analysis-overlay');
+
+    const sendUrl = "{{ send_url }}";
+    const finishUrl = "{{ finish_url }}";
+    const abandonUrl = "{{ abandon_url }}";
+    const resultsUrl = "{{ results_url }}";
+    const csrfTokenInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+    const csrfToken = csrfTokenInput ? csrfTokenInput.value : '';
+
+    const userNickname = "{{ request.user.nickname|escapejs }}";
+    const userAvatarLetter = "{{ request.user.nickname|slice:':1'|upper|escapejs }}";
+    const characterName = "{{ character_name|escapejs }}";
+    const characterImageUrl = "{{ character_image_url|default:''|escapejs }}";
+
+    let dialogActive = {{ can_send_message|yesno:"true,false" }};
+    let secondsRemaining = Number(timerValueNode.textContent || 0);
+
+    function secondsToTimer(seconds) {
+        const safeSeconds = Math.max(0, Number(seconds) || 0);
+        const minutes = String(Math.floor(safeSeconds / 60)).padStart(2, '0');
+        const restSeconds = String(safeSeconds % 60).padStart(2, '0');
+        return `${minutes}:${restSeconds}`;
+    }
+
+    function isNearBottom() {
+        const threshold = 120;
+        return (messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight) < threshold;
+    }
+
+    function scrollToBottom(force) {
+        if (force || isNearBottom()) {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    }
+
+    function buildAvatarNode(role) {
+        const avatarNode = document.createElement('div');
+        avatarNode.className = `chat-message-avatar ${role === 'user' ? 'chat-message-avatar--user' : 'chat-message-avatar--assistant'}`;
+
+        if (role === 'user') {
+            avatarNode.textContent = userAvatarLetter;
+            return avatarNode;
+        }
+
+        if (characterImageUrl) {
+            const image = document.createElement('img');
+            image.src = characterImageUrl;
+            image.alt = characterName;
+            image.loading = 'lazy';
+            avatarNode.appendChild(image);
+            return avatarNode;
+        }
+
+        const fallbackLetter = document.createElement('span');
+        fallbackLetter.textContent = characterName.slice(0, 1).toUpperCase();
+        avatarNode.appendChild(fallbackLetter);
+        return avatarNode;
+    }
+
+    function appendMessage(message) {
+        const shouldStickToBottom = isNearBottom();
+        const article = document.createElement('article');
+        const isUser = message.role === 'user';
+        article.className = `chat-message ${isUser ? 'chat-message--user' : 'chat-message--assistant'}`;
+
+        const contentNode = document.createElement('div');
+        contentNode.className = 'chat-message-content';
+
+        const metaNode = document.createElement('div');
+        metaNode.className = 'chat-message-meta';
+        metaNode.textContent = isUser ? userNickname : characterName;
+
+        const bubbleNode = document.createElement('div');
+        bubbleNode.className = `chat-message-bubble ${isUser ? 'chat-message-bubble--user' : 'chat-message-bubble--assistant'}`;
+        bubbleNode.textContent = message.text;
+
+        contentNode.appendChild(metaNode);
+        contentNode.appendChild(bubbleNode);
+
+        if (isUser) {
+            article.appendChild(contentNode);
+            article.appendChild(buildAvatarNode('user'));
+        } else {
+            article.appendChild(buildAvatarNode('assistant'));
+            article.appendChild(contentNode);
+        }
+
+        messagesContainer.insertBefore(article, pendingIndicator);
+        scrollToBottom(shouldStickToBottom);
+    }
+
+    function appendLocalUserMessage(text) {
+        appendMessage({role: 'user', text: text});
+    }
+
+    async function finishDialog(reason) {
+        if (!dialogActive) {
+            return;
+        }
+        dialogActive = false;
+        pendingIndicator.classList.remove('d-none');
+        pendingIndicator.textContent = 'Завершаю диалог...';
+        if (reason === 'manual_feedback' && analysisOverlay) {
+            analysisOverlay.classList.remove('d-none');
+        }
+
+        if (textarea) {
+            textarea.disabled = true;
+        }
+        if (sendButton) {
+            sendButton.disabled = true;
+        }
+        if (finishButton) {
+            finishButton.disabled = true;
+        }
+
+        try {
+            const response = await fetch(finishUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                },
+                body: JSON.stringify({reason: reason}),
+            });
+            const payload = await response.json();
+            if (!payload.ok) {
+                alert(payload.message || 'Не удалось завершить диалог.');
+                dialogActive = true;
+                if (analysisOverlay) {
+                    analysisOverlay.classList.add('d-none');
+                }
+                return;
+            }
+
+            if (reason === 'timeout') {
+                pendingIndicator.textContent = 'Время диалога истекло';
+                setTimeout(function () {
+                    window.location.href = payload.data.redirect_url || resultsUrl;
+                }, 3000);
+            } else {
+                window.location.href = payload.data.redirect_url || resultsUrl;
+            }
+        } catch (error) {
+            alert('Ошибка сети при завершении диалога.');
+            dialogActive = true;
+            if (analysisOverlay) {
+                analysisOverlay.classList.add('d-none');
+            }
+        } finally {
+            if (reason !== 'timeout') {
+                pendingIndicator.classList.add('d-none');
+            }
+            if (dialogActive && finishButton) {
+                finishButton.disabled = false;
+            }
+            if (dialogActive && textarea) {
+                textarea.disabled = false;
+            }
+            if (dialogActive && sendButton) {
+                sendButton.disabled = false;
+            }
+        }
+    }
+
+    if (form) {
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            if (!dialogActive) {
+                return;
+            }
+            const text = textarea.value.trim();
+            if (!text) {
+                return;
+            }
+
+            const shouldStickToBottom = isNearBottom();
+            appendLocalUserMessage(text);
+            textarea.value = '';
+            pendingIndicator.classList.remove('d-none');
+            pendingIndicator.textContent = 'Думаю...';
+            textarea.disabled = true;
+            sendButton.disabled = true;
+
+            try {
+                const response = await fetch(sendUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken,
+                    },
+                    body: JSON.stringify({text: text}),
+                });
+                const payload = await response.json();
+                if (!payload.ok) {
+                    alert(payload.message || 'Ошибка отправки сообщения.');
+                    if (payload.code === 'dialog_not_active') {
+                        window.location.href = resultsUrl;
+                    }
+                    return;
+                }
+
+                appendMessage(payload.data.assistant_message);
+                secondsRemaining = Number(payload.data.dialog.seconds_remaining || secondsRemaining);
+                timerValueNode.textContent = secondsToTimer(secondsRemaining);
+                scrollToBottom(shouldStickToBottom);
+            } catch (error) {
+                appendMessage({
+                    role: 'assistant',
+                    text: 'Ошибка сети при отправке. Проверьте подключение к серверу и попробуйте снова.',
+                });
+            } finally {
+                pendingIndicator.classList.add('d-none');
+                textarea.disabled = false;
+                sendButton.disabled = false;
+                textarea.focus();
+            }
+        });
+    }
+
+    if (finishButton) {
+        finishButton.addEventListener('click', function () {
+            finishDialog('manual_feedback');
+        });
+    }
+
+    timerValueNode.textContent = secondsToTimer(secondsRemaining);
+    scrollToBottom(true);
+
+    if (dialogActive) {
+        const timerId = setInterval(function () {
+            if (!dialogActive) {
+                clearInterval(timerId);
+                return;
+            }
+            secondsRemaining = Math.max(0, secondsRemaining - 1);
+            timerValueNode.textContent = secondsToTimer(secondsRemaining);
+            if (secondsRemaining === 0) {
+                clearInterval(timerId);
+                finishDialog('timeout');
+            }
+        }, 1000);
+
+        window.addEventListener('beforeunload', function () {
+            if (!dialogActive) {
+                return;
+            }
+            const beaconData = new FormData();
+            beaconData.append('csrfmiddlewaretoken', csrfToken);
+            beaconData.append('reason', 'page_leave');
+            navigator.sendBeacon(abandonUrl, beaconData);
+        });
+    }
+})();
+</script>
+{% endblock %}

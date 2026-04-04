@@ -1,0 +1,25 @@
+{% extends "adminpanel/base.html" %}
+
+{% block title %}Создать пользователя{% endblock %}
+
+{% block backoffice_content %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <form method="post" novalidate>
+            {% csrf_token %}
+            {{ form.non_field_errors }}
+            {% for field in form %}
+                <div class="mb-3">
+                    {{ field.label_tag }}
+                    {{ field }}
+                    <div class="text-danger small">{{ field.errors }}</div>
+                </div>
+            {% endfor %}
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary">Создать</button>
+                <a href="{% url 'adminpanel:dashboard' %}" class="btn btn-outline-secondary">Отмена</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
