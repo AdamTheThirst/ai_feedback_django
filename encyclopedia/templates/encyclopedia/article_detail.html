@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}{{ article.title }}{% endblock %}
+
+{% block layout %}
+<main class="content-scroll">
+    <h1>{{ article.title }}</h1>
+    <div class="article-body">{{ article.body|striptags }}</div>
+</main>
+<footer class="bottom-fixed">
+    <a class="btn" href="{% url 'encyclopedia:list' %}">Назад в энциклопедию</a>
+    <a class="btn btn-primary" href="{% url 'games' %}">Назад к упражнениям</a>
+</footer>
+{% endblock %}

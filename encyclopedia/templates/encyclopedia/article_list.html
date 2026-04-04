@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Энциклопедия{% endblock %}
+
+{% block layout %}
+<header class="top-fixed"><strong>Энциклопедия</strong></header>
+<main class="content-scroll">
+    {% for article in page_obj.object_list %}
+        <div class="card">
+            <span>{{ article.title }}</span>
+            <a class="btn" href="{% url 'encyclopedia:detail' slug=article.slug %}">Читать</a>
+        </div>
+    {% empty %}
+        <p>Пока нет опубликованных статей.</p>
+    {% endfor %}
+
+    {% if page_obj.paginator.num_pages > 1 %}
+        <nav class="pagination" aria-label="Пагинация">
+            {% if page_obj.has_previous %}
+                <a class="btn" href="?page={{ page_obj.previous_page_number }}">Назад</a>
+            {% endif %}
+            <span>Страница {{ page_obj.number }} из {{ page_obj.paginator.num_pages }}</span>
+            {% if page_obj.has_next %}
+                <a class="btn" href="?page={{ page_obj.next_page_number }}">Вперёд</a>
+            {% endif %}
+        </nav>
+    {% endif %}
+</main>
+<footer class="bottom-fixed">
+    <a class="btn btn-primary" href="{% url 'games' %}">Назад к упражнениям</a>
+</footer>
+{% endblock %}
